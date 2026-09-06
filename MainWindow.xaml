@@ -195,13 +195,10 @@
                                 <ColumnDefinition Width="38"/>
                             </Grid.ColumnDefinitions>
 
-                            <Border Width="36"
-                                    Height="36"
-                                    CornerRadius="9"
-                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center">
-                                <Grid>
+                            <Grid Width="36"
+                                  Height="36"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center">
                                     <FontIcon Glyph="&#xECAA;"
                                               FontSize="15"
                                               Opacity="0.45"
@@ -213,8 +210,7 @@
                                            Stretch="Uniform"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"/>
-                                </Grid>
-                            </Border>
+                            </Grid>
 
                             <TextBlock Grid.Column="1"
                                        Margin="10,0,18,0"
@@ -234,7 +230,7 @@
                             <!-- Visual parity with Digital Wellbeing's per-app timer affordance.
                                  It is intentionally non-interactive until app limits are implemented. -->
                             <TextBlock Grid.Column="3"
-                                       Text="âŒ›"
+                                       Text="&#x231B;"
                                        FontFamily="Segoe UI Symbol"
                                        FontSize="16"
                                        Opacity="0.62"

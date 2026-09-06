@@ -37,7 +37,7 @@ Screeny tracks the foreground application, keeps finalized usage history on your
   <a href="https://shadowur0.github.io/Screeny/"><strong>Open the Screeny download page →</strong></a>
 </p>
 
-Current development release: **1.8.2** · **Windows 11** · **x64**
+Current development release: **1.8.3** · **Windows 11** · **x64**
 
 Use `Screeny-Setup.exe` for normal installation. Future installers use the same application identity and install location, so newer versions replace the existing Screeny installation. Running Screeny is asked to shut down cleanly during an upgrade.
 

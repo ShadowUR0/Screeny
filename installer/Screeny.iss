@@ -1,6 +1,6 @@
 ; Modified in the ShadowUR0 Screeny fork in 2026.
 #define MyAppName "Screeny"
-#define MyAppVersion "1.8.2"
+#define MyAppVersion "1.8.3"
 #define MyAppExeName "Screeny.exe"
 
 [Setup]

@@ -10,7 +10,7 @@
 	  	<Identity
   	  Name="ArnoGevorkyan.ScreenyScreenTime"
   	  Publisher="CN=68946438-19C3-48BF-A76C-3CED272FBD27"
-    Version="1.8.2.0" />
+    Version="1.8.3.0" />
 
 	<Properties>
 		<DisplayName>Screeny â€“ Screen Time</DisplayName>
