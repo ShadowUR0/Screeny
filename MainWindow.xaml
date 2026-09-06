@@ -24,8 +24,6 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Native draggable title bar. Keep it intentionally quiet so the activity
-             view, not app chrome, owns the visual hierarchy. -->
         <Grid x:Name="AppTitleBar"
               Grid.Row="0"
               Height="44"
@@ -46,9 +44,8 @@
             </StackPanel>
         </Grid>
 
-        <!-- Page heading + compact controls -->
         <Grid Grid.Row="1"
-              MaxWidth="980"
+              MaxWidth="820"
               Padding="32,18,32,0"
               HorizontalAlignment="Stretch">
             <Grid.ColumnDefinitions>
@@ -56,8 +53,8 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <TextBlock Text="App activity"
-                       FontSize="34"
+            <TextBlock Text="App activity details"
+                       FontSize="32"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center"/>
 
@@ -90,41 +87,44 @@
             </StackPanel>
         </Grid>
 
-        <!-- Digital-Wellbeing-style hero total -->
         <StackPanel Grid.Row="2"
-                    MaxWidth="980"
-                    Margin="32,26,32,6"
+                    MaxWidth="820"
+                    Margin="32,24,32,6"
                     HorizontalAlignment="Stretch">
             <Border Padding="15,7"
                     CornerRadius="18"
                     Background="{ThemeResource AccentFillColorSecondaryBrush}"
                     HorizontalAlignment="Center">
-                <TextBlock Text="Screen time"
-                           FontSize="14"
-                           FontWeight="SemiBold"/>
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="Screen time"
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+                    <FontIcon Glyph="&#xE70D;"
+                              FontSize="11"
+                              Opacity="0.75"
+                              VerticalAlignment="Center"/>
+                </StackPanel>
             </Border>
 
             <TextBlock x:Name="ChartTimeValue"
                        Text="0s"
-                       Margin="0,20,0,0"
+                       Margin="0,18,0,0"
                        FontSize="58"
                        FontWeight="Light"
                        TextAlignment="Center"
                        HorizontalAlignment="Center"/>
 
-            <TextBlock Text="{Binding FormattedSelectedDate}"
-                       Margin="0,3,0,0"
+            <TextBlock Text="{Binding FriendlySelectedDate}"
+                       Margin="0,2,0,0"
                        FontSize="15"
                        Opacity="0.68"
                        TextAlignment="Center"
                        HorizontalAlignment="Center"/>
         </StackPanel>
 
-        <!-- Chart. No enclosing card and no decorative animation: fewer visual layers,
-             closer to the reference, and cheaper to redraw. -->
         <Grid Grid.Row="3"
-              MaxWidth="980"
-              Margin="32,6,32,18"
+              MaxWidth="820"
+              Margin="32,6,32,16"
               HorizontalAlignment="Stretch">
             <lvc:CartesianChart x:Name="UsageChartLive"
                                 Height="210"
@@ -140,10 +140,8 @@
                           VerticalAlignment="Center"/>
         </Grid>
 
-        <!-- The app list owns the remaining height so ListView virtualization stays active.
-             Avoid wrapping it in another ScrollViewer. -->
         <Grid Grid.Row="4"
-              MaxWidth="980"
+              MaxWidth="820"
               Padding="32,0,32,24"
               HorizontalAlignment="Stretch">
             <Grid.RowDefinitions>
@@ -169,6 +167,7 @@
                            VerticalAlignment="Center"/>
             </Grid>
 
+            <!-- ListView remains the only scrolling surface so recycling/virtualization stays active. -->
             <ListView x:Name="UsageListView"
                       Grid.Row="1"
                       ItemsSource="{Binding Records}"
@@ -186,11 +185,12 @@
 
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="models:AppUsageRecord">
-                        <Grid MinHeight="66" Padding="8,7">
+                        <Grid MinHeight="62" Padding="8,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="44"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="38"/>
                             </Grid.ColumnDefinitions>
 
                             <Border Width="36"
@@ -214,19 +214,13 @@
                                 </Grid>
                             </Border>
 
-                            <StackPanel Grid.Column="1"
-                                        Margin="10,0,18,0"
-                                        VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind ApplicationName, Mode=OneWay}"
-                                           FontSize="17"
-                                           FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{x:Bind ProcessName, Mode=OneWay}"
-                                           Margin="0,2,0,0"
-                                           FontSize="12"
-                                           Opacity="0.52"
-                                           TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
+                            <TextBlock Grid.Column="1"
+                                       Margin="10,0,18,0"
+                                       Text="{x:Bind ApplicationName, Mode=OneWay}"
+                                       FontSize="17"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
 
                             <TextBlock Grid.Column="2"
                                        Text="{x:Bind FormattedDuration, Mode=OneWay}"
@@ -234,14 +228,22 @@
                                        Opacity="0.78"
                                        VerticalAlignment="Center"
                                        TextAlignment="Right"/>
+
+                            <!-- Visual parity with Digital Wellbeing's per-app timer affordance.
+                                 It is intentionally non-interactive until app limits are implemented. -->
+                            <TextBlock Grid.Column="3"
+                                       Text="⌛"
+                                       FontFamily="Segoe UI Symbol"
+                                       FontSize="16"
+                                       Opacity="0.62"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"/>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
         </Grid>
 
-        <!-- Compatibility elements retained for existing code-behind while the old
-             summary/control surface is removed from the visible UI. -->
         <Grid Visibility="Collapsed">
             <TextBlock x:Name="ChartTitleLabel" Text="Screen time"/>
             <TextBlock x:Name="SummaryTitle" Text="Daily Screen Time Summary"/>
