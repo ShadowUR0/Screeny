@@ -8,10 +8,13 @@ namespace ScreenTimeTracker.Services;
 /// <summary>
 /// Keeps one Screeny process per interactive Windows session. A second launch
 /// brings the existing dashboard forward instead of creating another tracker.
+/// Also exposes a lightweight cross-process signal used by the installer before
+/// replacing application files during an upgrade.
 /// </summary>
 internal sealed class SingleInstanceService : IDisposable
 {
     private const string MutexName = @"Local\Screeny.SingleInstance";
+    private const string UpdateShutdownEventName = @"Local\Screeny.UpdateShutdown";
     private const int SW_SHOW = 5;
     private const int SW_RESTORE = 9;
 
@@ -28,6 +31,7 @@ internal sealed class SingleInstanceService : IDisposable
     private static extern bool IsIconic(IntPtr hWnd);
 
     private readonly Mutex _mutex;
+    private readonly EventWaitHandle _updateShutdownEvent;
     private readonly bool _ownsMutex;
 
     public bool IsPrimaryInstance => _ownsMutex;
@@ -35,6 +39,10 @@ internal sealed class SingleInstanceService : IDisposable
     public SingleInstanceService()
     {
         _mutex = new Mutex(initiallyOwned: true, MutexName, out _ownsMutex);
+        _updateShutdownEvent = new EventWaitHandle(
+            initialState: false,
+            EventResetMode.AutoReset,
+            UpdateShutdownEventName);
     }
 
     public void ActivateExistingInstance()
@@ -73,8 +81,35 @@ internal sealed class SingleInstanceService : IDisposable
         }
     }
 
+    public void WaitForUpdateShutdownRequest()
+    {
+        _updateShutdownEvent.WaitOne();
+    }
+
+    public bool RequestUpdateShutdownAndWaitForExit(TimeSpan timeout)
+    {
+        _updateShutdownEvent.Set();
+
+        try
+        {
+            if (!_mutex.WaitOne(timeout))
+                return false;
+
+            // The primary process released its mutex, so the update can replace files.
+            _mutex.ReleaseMutex();
+            return true;
+        }
+        catch (AbandonedMutexException)
+        {
+            // A terminated primary also means its executable is no longer locked.
+            return true;
+        }
+    }
+
     public void Dispose()
     {
+        _updateShutdownEvent.Dispose();
+
         if (_ownsMutex)
         {
             try { _mutex.ReleaseMutex(); }
