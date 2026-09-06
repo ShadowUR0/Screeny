@@ -1,35 +1,20 @@
-using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
-using LiveChartsCore.SkiaSharpView.Painting;
-using LiveChartsCore.Defaults;
-using Microsoft.UI;
-using Microsoft.UI.Xaml;
-using ScreenTimeTracker.Models;
-using SkiaSharp;
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using LiveChartsCore;
+using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
+using Microsoft.UI.Xaml;
+using ScreenTimeTracker.Models;
+using SkiaSharp;
 
 namespace ScreenTimeTracker.Helpers
 {
-    /// <summary>
-    /// Helper class for chart visualization and time formatting
-    /// </summary>
-    public class ChartHelper
+    public static class ChartHelper
     {
-        /// <summary>
-        /// Updates the usage chart with hourly data
-        /// </summary>
-        /// <param name="chart">The chart control to update</param>
-        /// <param name="usageRecords">Collection of usage records to visualize</param>
-        /// <param name="viewMode">The chart view mode (Hourly or Daily)</param>
-        /// <param name="timePeriod">The time period (Daily, Weekly, etc.)</param>
-        /// <param name="selectedDate">The selected date for filtering</param>
-        /// <param name="selectedEndDate">Optional end date for range selection</param>
-        /// <param name="liveFocusedRecord">The currently active/focused record from the tracking service (optional)</param>
-        /// <returns>The total time calculated from the records</returns>
         public static TimeSpan UpdateUsageChart(
-            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart, 
+            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart,
             ICollection<AppUsageRecord> usageRecords,
             ChartViewMode viewMode,
             TimePeriod timePeriod,
@@ -38,509 +23,371 @@ namespace ScreenTimeTracker.Helpers
             AppUsageRecord? liveFocusedRecord = null)
         {
             if (chart == null)
-            {
                 return TimeSpan.Zero;
+
+            TimeSpan totalTime = TimeUtil.CalculateUniqueTotalTime(usageRecords);
+            SKColor seriesColor = GetSeriesColor();
+            SKColor axisColor = Application.Current.RequestedTheme == ApplicationTheme.Dark
+                ? SKColors.White
+                : SKColors.Black;
+
+            if (viewMode == ChartViewMode.Hourly)
+            {
+                UpdateHourlyChart(chart, usageRecords, selectedDate, selectedEndDate, seriesColor, axisColor);
+            }
+            else
+            {
+                UpdateDailyChart(chart, usageRecords, timePeriod, selectedDate, selectedEndDate, seriesColor, axisColor);
             }
 
-            // Use unique-time calculation to avoid double-counting overlapping apps
-            TimeSpan totalTime = TimeUtil.CalculateUniqueTotalTime(usageRecords);
-            
-            // Get system accent color for chart series
-            SKColor seriesColor;
-            
-            // Try to get the system accent color
+            chart.LegendPosition = LiveChartsCore.Measure.LegendPosition.Hidden;
+            chart.AnimationsSpeed = TimeSpan.Zero;
+            return totalTime;
+        }
+
+        private static SKColor GetSeriesColor()
+        {
             try
             {
-                if (Application.Current.Resources.TryGetValue("SystemAccentColor", out object accentColorObj) && 
-                    accentColorObj is Windows.UI.Color accentColor)
+                if (Application.Current.Resources.TryGetValue("SystemAccentColor", out object accentColorObject) &&
+                    accentColorObject is Windows.UI.Color accentColor)
                 {
-                    seriesColor = new SKColor(accentColor.R, accentColor.G, accentColor.B);
-                }
-                else
-                {
-                    // Default fallback color if system accent color isn't available
-                    seriesColor = SKColors.DodgerBlue;
+                    return new SKColor(accentColor.R, accentColor.G, accentColor.B);
                 }
             }
             catch
             {
-                // Fallback color if anything goes wrong
-                seriesColor = SKColors.DodgerBlue;
             }
-            
-            // Create a darker color for axis text for better contrast
-            SKColor axisColor = SKColors.Black;
-            if (Application.Current.RequestedTheme == ApplicationTheme.Dark)
-            {
-                axisColor = SKColors.White;
-            }
-            
-            if (viewMode == ChartViewMode.Hourly)
-            {
-                // We keep two data structures:
-                // 1) hourlyIntervals  : list of all [start, end] fragments for each hour
-                // 2) hourlyUsage      : final merged, non-overlapping total in hours for each hour
 
-                var hourlyIntervals = new Dictionary<int, List<(DateTime Start, DateTime End)>>();
-                var hourlyUsage     = new Dictionary<int, double>();
-                
-                // Initialise
-                for (int h = 0; h < 24; h++)
-                {
-                    hourlyIntervals[h] = new List<(DateTime, DateTime)>();
-                    hourlyUsage[h]     = 0;
-                }
-
-                // Collect fragments per hour without summing yet (avoids double counting)
-                // Diagnostics removed for performance
-                foreach (var record in usageRecords)
-                {
-                    var start = record.StartTime;
-
-                    DateTime end;
-                    if (record.EndTime.HasValue)
-                    {
-                        end = record.EndTime.Value;
-                    }
-                    else if (record.IsFocused)
-                    {
-                        end = DateTime.Now;
-                    }
-                    else
-                    {
-                        end = start + record.Duration;
-                    }
-
-                    if (end < start) end = start; // safety guard
-
-                    for (int hr = start.Hour; hr <= end.Hour; hr++)
-                    {
-                        var slotStart      = start.Date.AddHours(hr);
-                        var slotEnd        = slotStart.AddHours(1);
-                        var overlapStart   = start > slotStart ? start : slotStart;
-                        var overlapEnd     = end   < slotEnd   ? end   : slotEnd;
-
-                        if (overlapEnd > overlapStart)
-                        {
-                            hourlyIntervals[hr].Add((overlapStart, overlapEnd));
-                        }
-                    }
-                }
-
-                // Merge overlaps inside each hour and compute the total unique time
-                for (int hr = 0; hr < 24; hr++)
-                {
-                    var merged = TimeUtil.MergeIntervals(hourlyIntervals[hr]);
-                    double totalHr = 0;
-                    foreach (var iv in merged)
-                    {
-                        totalHr += (iv.End - iv.Start).TotalHours;
-                    }
-
-                    // Clamp to [0,1] – do not artificially floor small values.
-                    totalHr = Math.Clamp(totalHr, 0, 1);
-                    hourlyUsage[hr] = totalHr;
-                }
-
-                // Check if all values are zero
-                bool allZero = true;
-                double maxValue = 0;
-                foreach (var value in hourlyUsage.Values)
-                {
-                    if (value > 0.0001)
-                    {
-                        allZero = false;
-                    }
-                    maxValue = Math.Max(maxValue, value);
-                }
-                
-                // If all values are zero, add a tiny value to the current hour to make the chart visible
-                if (allZero || maxValue < 0.001)
-                {
-                    int currentHour = DateTime.Now.Hour;
-                    hourlyUsage[currentHour] = 0.001; // Add a tiny value
-                }
-
-                // MODIFICATION: Filter to only include hours with usage
-                var nonZeroHours = hourlyUsage
-                    .Where(h => h.Value > 0.0001)
-                    .Select(h => h.Key)
-                    .OrderBy(h => h)
-                    .ToList();
-                
-                // If we have no non-zero hours, include the current hour
-                if (nonZeroHours.Count == 0)
-                {
-                    nonZeroHours.Add(DateTime.Now.Hour);
-                }
-                
-                // Determine if we should show a compact view (no empty bars)
-                bool showCompact = selectedEndDate == null &&
-                                   (selectedDate.Date == DateTime.Today || selectedDate.Date == DateTime.Today.AddDays(-1));
-
-                List<int> displayHours;
-                int filteredStartHour = 0;
-                int filteredEndHour   = 23;
-
-                if (showCompact)
-                {
-                    // Show only hours that actually have usage
-                    displayHours = nonZeroHours;
-                }
-                else
-                {
-                    // Original padding/min-range logic ----------------------
-                    int earliestHour = nonZeroHours.First();
-                    int latestHour   = nonZeroHours.Last();
-
-                    if (nonZeroHours.Count <= 3)
-                    {
-                        int middleHour       = (earliestHour + latestHour) / 2;
-                        filteredStartHour    = Math.Max(0, middleHour - 3);
-                        filteredEndHour      = Math.Min(23, middleHour + 3);
-                    }
-                    else
-                    {
-                        filteredStartHour    = Math.Max(0, earliestHour - 1);
-                        filteredEndHour      = Math.Min(23, latestHour + 1);
-                    }
-
-                    // Ensure at least 6 visible hours
-                    while (filteredEndHour - filteredStartHour < 5 && (filteredStartHour > 0 || filteredEndHour < 23))
-                    {
-                        if (filteredStartHour > 0) filteredStartHour--; else filteredEndHour++;
-                    }
-
-                    // For today, never show future hours
-                    if (selectedDate.Date == DateTime.Today)
-                    {
-                        int nowHour = DateTime.Now.Hour;
-                        if (filteredEndHour > nowHour) filteredEndHour = nowHour;
-                    }
-
-                    displayHours = Enumerable.Range(filteredStartHour, filteredEndHour - filteredStartHour + 1).ToList();
-                }
-
-                // Build values + labels ---------------------------------------------------
-                var values = new List<double>();
-                var labels = new List<string>();
-
-                bool useShortLabels = chart.ActualWidth < 500;
-
-                foreach (int hr in displayHours)
-                {
-                    values.Add(hourlyUsage[hr]);
-
-                    string label = "";
-                    if (useShortLabels)
-                    {
-                        label = $"{(hr % 12 == 0 ? 12 : hr % 12)}{(hr >= 12 ? "p" : "a")}";
-                    }
-                    else if (chart.ActualWidth < 700)
-                    {
-                        label = $"{(hr % 12 == 0 ? 12 : hr % 12)}{(hr >= 12 ? "PM" : "AM")}";
-                    }
-                    else
-                    {
-                        label = $"{(hr % 12 == 0 ? 12 : hr % 12)} {(hr >= 12 ? "PM" : "AM")}";
-                    }
-                    labels.Add(label);
-                }
-
-                maxValue = values.Count > 0 ? values.Max() : 0;
-                
-                // Determine a good Y-axis maximum based on the actual data
-                double yAxisMax = maxValue;
-                if (yAxisMax < 0.005) yAxisMax = 0.01;  // Very small values
-                else if (yAxisMax < 0.05) yAxisMax = 0.1;  // Small values
-                else if (yAxisMax < 0.5) yAxisMax = 1;  // Medium values
-                else yAxisMax = Math.Ceiling(yAxisMax * 1.2);  // Large values
-                
-                // Create column series for hourly usage (values already clamped to max 1h)
-                var columnSeries = new ColumnSeries<double>
-                {
-                    Values       = values,
-                    Fill         = new SolidColorPaint(seriesColor),
-                    Stroke       = null,
-                    Padding      = 0,
-                    Name         = "Usage",
-                    AnimationsSpeed = TimeSpan.Zero,
-                    EasingFunction  = null
-                };
-
-                // To avoid the visual "jump" each second, keep the same series instance if one already
-                // exists; otherwise assign the new one.  This prevents LiveCharts from animating in a
-                // fresh collection every tick.
-                if (chart.Series?.FirstOrDefault() is ColumnSeries<double> existingSeries)
-                {
-                    existingSeries.Values = values;
-                }
-                else
-                {
-                chart.Series = new ISeries[] { columnSeries };
-                }
-
-                // Ensure the chart itself does not animate property changes.
-                chart.AnimationsSpeed = TimeSpan.Zero;
-
-                // Category X-axis using hour labels
-                chart.XAxes = new Axis[]
-                {
-                    new Axis
-                    {
-                        Labels = labels,
-                        LabelsRotation = useShortLabels ? 0 : 45,
-                        ForceStepToMin = true,
-                        MinStep        = 1,
-                        TextSize       = 11,
-                        LabelsPaint    = new SolidColorPaint(axisColor),
-                        SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
-                    }
-                };
-
-                // Set up Y-axis fixed from 0 to 1 hour
-                chart.YAxes = new Axis[]
-                {
-                    new Axis
-                    {
-                        Name            = string.Empty,
-                        NamePaint       = null,
-                        NameTextSize    = 12,
-                        LabelsPaint     = new SolidColorPaint(axisColor),
-                        TextSize        = 11,
-                        MinLimit        = 0,
-                        MaxLimit        = 1,
-                        ForceStepToMin  = true,
-                        MinStep         = 0.25,
-                        Labeler         = TimeUtil.FormatHoursForYAxis,
-                        SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
-                    }
-                };
-            }
-            else // Daily view
-            {
-                int daysToShow;
-                DateTime rangeStartDate; // Use a specific variable for the range start
-
-                if (selectedEndDate.HasValue && selectedDate.Date <= selectedEndDate.Value.Date)
-                {
-                    // Handle custom date range or "Last 7 Days" selection
-                    rangeStartDate = selectedDate.Date;
-                    daysToShow = (selectedEndDate.Value.Date - selectedDate.Date).Days + 1;
-                }
-                else // Single date or standard weekly view based on selectedDate
-                {
-                    // Determine days based on time period (defaulting to daily if unsure)
-                    daysToShow = (timePeriod == TimePeriod.Weekly) ? 7 : 1;
-                    // Calculate start date based on the END date (selectedDate) for standard views
-                    rangeStartDate = selectedDate.Date.AddDays(-(daysToShow - 1));
-                }
-
-                var values = new List<double>();
-                var labels = new List<string>();
-                double maxValue = 0;
-                DateTime currentDate = DateTime.Now.Date; // Use Today's date for labeling
-
-                // First, prepare a dictionary with all dates in the range initialized to zero
-                // This ensures every day has a value and is shown in the chart
-                var dayData = new Dictionary<DateTime, double>();
-                var dayLabels = new Dictionary<DateTime, string>();
-
-                // Initialize all days in the range with zero values and proper labels
-                for (int i = 0; i < daysToShow; i++)
-                {
-                    DateTime date = rangeStartDate.AddDays(i);
-                    
-                    // Set label for this date
-                    string label;
-                    if (date.Date == currentDate)
-                    {
-                        label = "Today";
-                    }
-                    else if (date.Date == currentDate.AddDays(-1))
-                    {
-                        label = "Yesterday";
-                    }
-                    else
-                    {
-                        // Use abbreviated month and day (e.g., "Apr 1")
-                        label = date.ToString("MMM d");
-                    }
-                    
-                    // Initialize with zero usage
-                    dayData[date.Date] = 0;
-                    dayLabels[date.Date] = label;
-                }
-
-                // --- Build per-day interval lists to avoid double-counting overlaps ---
-                var perDayIntervals = new Dictionary<DateTime, List<(DateTime Start, DateTime End)>>();
-                foreach (var key in dayData.Keys)
-                    perDayIntervals[key] = new List<(DateTime, DateTime)>();
-
-                foreach (var record in usageRecords)
-                {
-                    var start = record.StartTime;
-                    var end   = record.EndTime ?? (record.IsFocused ? DateTime.Now : record.StartTime + record.Duration);
-                    if (end <= start) continue;
-
-                    var day = start.Date;
-                    if (day < rangeStartDate || day > rangeStartDate.AddDays(daysToShow-1)) continue;
-
-                    perDayIntervals[day].Add((start, end));
-                }
-
-                // Merge intervals per day and convert to hours
-                foreach (var kvp in perDayIntervals)
-                {
-                    var merged = TimeUtil.MergeIntervals(kvp.Value);
-                    double hrs  = merged.Sum(iv => (iv.End - iv.Start).TotalHours);
-                    if (hrs > 24) hrs = 24; // safety clamp – a single day cannot exceed 24 h
-                    dayData[kvp.Key] = hrs;
-                }
-
-                // Now add the data and labels to the chart in chronological order
-                for (int i = 0; i < daysToShow; i++)
-                {
-                    DateTime date = rangeStartDate.AddDays(i);
-                    
-                    // Get the data and label for this day
-                    if (dayData.TryGetValue(date.Date, out double hours) && dayLabels.TryGetValue(date.Date, out string? lbl))
-                    {
-                        values.Add(hours);
-                        labels.Add(lbl);
-                    }
-                }
-
-                // If all values are zero, add a tiny value to make the chart visible
-                bool allZero = values.All(v => v < 0.0001);
-                maxValue = values.Count > 0 ? values.Max() : 0;
-                
-                if (allZero || maxValue < 0.001)
-                {
-                    // Only add the tiny value to today or the last day if today isn't in range
-                    int todayIndex = labels.IndexOf("Today");
-                    if (todayIndex >= 0)
-                    {
-                        values[todayIndex] = 0.001;
-                    }
-                    else
-                    {
-                        values[values.Count - 1] = 0.001;
-                    }
-                    maxValue = 0.001;
-                }
-
-                // Determine a good Y-axis maximum based on the actual data
-                double yAxisMax = maxValue;
-                if (yAxisMax < 0.005) yAxisMax = 0.01;  // Very small values
-                else if (yAxisMax < 0.05) yAxisMax = 0.1;  // Small values
-                else if (yAxisMax < 0.5) yAxisMax = 1;  // Medium values
-                else yAxisMax = Math.Ceiling(yAxisMax * 1.2);  // Large values
-                
-                // Для недельного режима: округляем максимум до ближайшего чётного часа
-                if (timePeriod == TimePeriod.Weekly)
-                {
-                    yAxisMax = Math.Ceiling(yAxisMax / 2) * 2;
-                }
-
-                // Create the column series with system accent color
-                var columnSeries = new ColumnSeries<double>
-                {
-                    Values = values,
-                    Fill = new SolidColorPaint(seriesColor), // Use system accent color
-                    Stroke = null, // No border
-                    MaxBarWidth = 30, // Limit maximum width for better appearance with few columns
-                    Name = "Usage"
-                };
-
-                // Set up the axes with improved contrast
-                // --- Improve X-axis label readability for long ranges ---
-                // Dynamically choose a step (how many labels to skip) based on the
-                // number of points to display.  Also tilt the text to avoid overlap.
-
-                int labelCount = labels.Count;
-                // Aim to render ~ 10-12 labels maximum for readability
-                double targetLabelCount = 12;
-                double minStep = Math.Max(1, Math.Ceiling(labelCount / targetLabelCount));
-
-                // Rotate labels only up to 45° for readability
-                double rotation = labelCount > 12 ? 45 : 0;
-
-                chart.XAxes = new Axis[]
-                {
-                    new Axis
-                    {
-                        Labels         = labels,
-                        LabelsRotation = rotation,
-                        ForceStepToMin = true,
-                        MinStep        = minStep,
-                        TextSize       = 11,
-                        LabelsPaint    = new SolidColorPaint(axisColor),
-                        SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
-                    }
-                };
-
-                chart.YAxes = new Axis[]
-                {
-                    new Axis
-                    {
-                        Name            = string.Empty,
-                        NamePaint       = null,
-                        NameTextSize    = 12,
-                        LabelsPaint     = new SolidColorPaint(axisColor),
-                        TextSize        = 11,
-                        MinLimit        = 0,
-                        MaxLimit        = yAxisMax,
-                        ForceStepToMin  = true,
-                        MinStep         = timePeriod == TimePeriod.Weekly ? 2 : (yAxisMax > 4 ? 2 : (yAxisMax < 0.1 ? 0.05 : 0.5)),
-                        Labeler         = TimeUtil.FormatHoursForYAxis,
-                        SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100)) // Subtle grid lines
-                    }
-                };
-
-                // Update the chart with new series
-                chart.Series = new ISeries[] { columnSeries };
-            }
-            
-            // Set additional chart properties for better appearance
-            chart.LegendPosition = LiveChartsCore.Measure.LegendPosition.Hidden;
-            
-            return totalTime;
+            return SKColors.DodgerBlue;
         }
 
-        /// <summary>
-        /// Forces a refresh of the chart by clearing and rebuilding it
-        /// </summary>
-        /// <param name="chart">The chart to refresh</param>
-        /// <param name="usageRecords">Collection of usage records</param>
-        /// <param name="viewMode">Current chart view mode</param>
-        /// <param name="timePeriod">Current time period</param>
-        /// <param name="selectedDate">Selected date</param>
-        /// <param name="selectedEndDate">Optional end date for range</param>
-        /// <returns>The total time calculated from the records</returns>
+        private static DateTime ResolveRecordEnd(AppUsageRecord record)
+        {
+            if (record.EndTime.HasValue)
+                return record.EndTime.Value;
+
+            if (record.IsFocused)
+                return DateTime.Now;
+
+            return record.StartTime + record.Duration;
+        }
+
+        private static void UpdateHourlyChart(
+            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart,
+            ICollection<AppUsageRecord> usageRecords,
+            DateTime selectedDate,
+            DateTime? selectedEndDate,
+            SKColor seriesColor,
+            SKColor axisColor)
+        {
+            var intervalsByHour = new List<(DateTime Start, DateTime End)>[24];
+            for (int hour = 0; hour < intervalsByHour.Length; hour++)
+                intervalsByHour[hour] = new List<(DateTime Start, DateTime End)>();
+
+            DateTime dayStart = selectedDate.Date;
+            DateTime dayEnd = dayStart.AddDays(1);
+
+            foreach (var record in usageRecords)
+            {
+                DateTime start = record.StartTime < dayStart ? dayStart : record.StartTime;
+                DateTime resolvedEnd = ResolveRecordEnd(record);
+                DateTime end = resolvedEnd > dayEnd ? dayEnd : resolvedEnd;
+                if (end <= start)
+                    continue;
+
+                int firstHour = start.Hour;
+                int lastHour = end >= dayEnd ? 23 : end.AddTicks(-1).Hour;
+
+                for (int hour = firstHour; hour <= lastHour; hour++)
+                {
+                    DateTime slotStart = dayStart.AddHours(hour);
+                    DateTime slotEnd = slotStart.AddHours(1);
+                    DateTime overlapStart = start > slotStart ? start : slotStart;
+                    DateTime overlapEnd = end < slotEnd ? end : slotEnd;
+                    if (overlapEnd > overlapStart)
+                        intervalsByHour[hour].Add((overlapStart, overlapEnd));
+                }
+            }
+
+            var hourlyUsage = new double[24];
+            var usedHours = new List<int>(24);
+            for (int hour = 0; hour < 24; hour++)
+            {
+                var merged = TimeUtil.MergeIntervals(intervalsByHour[hour]);
+                double totalHours = 0;
+                foreach (var interval in merged)
+                    totalHours += (interval.End - interval.Start).TotalHours;
+
+                hourlyUsage[hour] = Math.Clamp(totalHours, 0, 1);
+                if (hourlyUsage[hour] > 0.0001)
+                    usedHours.Add(hour);
+            }
+
+            bool compact = !selectedEndDate.HasValue &&
+                           (selectedDate.Date == DateTime.Today ||
+                            selectedDate.Date == DateTime.Today.AddDays(-1));
+
+            List<int> displayHours;
+            if (usedHours.Count == 0)
+            {
+                int fallbackHour = selectedDate.Date == DateTime.Today ? DateTime.Now.Hour : 12;
+                displayHours = new List<int> { fallbackHour };
+            }
+            else if (compact)
+            {
+                displayHours = usedHours;
+            }
+            else
+            {
+                int earliestHour = usedHours[0];
+                int latestHour = usedHours[^1];
+                int startHour;
+                int endHour;
+
+                if (usedHours.Count <= 3)
+                {
+                    int middle = (earliestHour + latestHour) / 2;
+                    startHour = Math.Max(0, middle - 3);
+                    endHour = Math.Min(23, middle + 3);
+                }
+                else
+                {
+                    startHour = Math.Max(0, earliestHour - 1);
+                    endHour = Math.Min(23, latestHour + 1);
+                }
+
+                while (endHour - startHour < 5 && (startHour > 0 || endHour < 23))
+                {
+                    if (startHour > 0) startHour--;
+                    else endHour++;
+                }
+
+                if (selectedDate.Date == DateTime.Today)
+                    endHour = Math.Min(endHour, DateTime.Now.Hour);
+
+                displayHours = Enumerable.Range(startHour, endHour - startHour + 1).ToList();
+            }
+
+            bool shortLabels = chart.ActualWidth < 500;
+            bool mediumLabels = chart.ActualWidth < 700;
+            var values = new List<double>(displayHours.Count);
+            var labels = new List<string>(displayHours.Count);
+
+            foreach (int hour in displayHours)
+            {
+                values.Add(hourlyUsage[hour]);
+                int twelveHour = hour % 12 == 0 ? 12 : hour % 12;
+                labels.Add(shortLabels
+                    ? $"{twelveHour}{(hour >= 12 ? "p" : "a")}"
+                    : mediumLabels
+                        ? $"{twelveHour}{(hour >= 12 ? "PM" : "AM")}"
+                        : $"{twelveHour} {(hour >= 12 ? "PM" : "AM")}");
+            }
+
+            UpdateSeries(chart, values, seriesColor, maxBarWidth: 40);
+
+            chart.XAxes = new Axis[]
+            {
+                new()
+                {
+                    Labels = labels,
+                    LabelsRotation = shortLabels ? 0 : 45,
+                    ForceStepToMin = true,
+                    MinStep = 1,
+                    TextSize = 11,
+                    LabelsPaint = new SolidColorPaint(axisColor),
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
+                }
+            };
+
+            chart.YAxes = new Axis[]
+            {
+                new()
+                {
+                    Name = string.Empty,
+                    NamePaint = null,
+                    LabelsPaint = new SolidColorPaint(axisColor),
+                    TextSize = 11,
+                    MinLimit = 0,
+                    MaxLimit = 1,
+                    ForceStepToMin = true,
+                    MinStep = 0.25,
+                    Labeler = TimeUtil.FormatHoursForYAxis,
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
+                }
+            };
+        }
+
+        private static void UpdateDailyChart(
+            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart,
+            ICollection<AppUsageRecord> usageRecords,
+            TimePeriod timePeriod,
+            DateTime selectedDate,
+            DateTime? selectedEndDate,
+            SKColor seriesColor,
+            SKColor axisColor)
+        {
+            DateTime rangeStart;
+            int daysToShow;
+
+            if (selectedEndDate.HasValue && selectedDate.Date <= selectedEndDate.Value.Date)
+            {
+                rangeStart = selectedDate.Date;
+                daysToShow = (selectedEndDate.Value.Date - rangeStart).Days + 1;
+            }
+            else
+            {
+                daysToShow = timePeriod == TimePeriod.Weekly ? 7 : 1;
+                rangeStart = selectedDate.Date.AddDays(-(daysToShow - 1));
+            }
+
+            if (daysToShow <= 0)
+                daysToShow = 1;
+
+            DateTime rangeEndExclusive = rangeStart.AddDays(daysToShow);
+            var intervalsByDay = new List<(DateTime Start, DateTime End)>[daysToShow];
+            for (int i = 0; i < daysToShow; i++)
+                intervalsByDay[i] = new List<(DateTime Start, DateTime End)>();
+
+            foreach (var record in usageRecords)
+            {
+                DateTime start = record.StartTime < rangeStart ? rangeStart : record.StartTime;
+                DateTime resolvedEnd = ResolveRecordEnd(record);
+                DateTime end = resolvedEnd > rangeEndExclusive ? rangeEndExclusive : resolvedEnd;
+                if (end <= start)
+                    continue;
+
+                int firstDay = Math.Max(0, (start.Date - rangeStart).Days);
+                int lastDay = Math.Min(daysToShow - 1, (end.AddTicks(-1).Date - rangeStart).Days);
+
+                for (int dayIndex = firstDay; dayIndex <= lastDay; dayIndex++)
+                {
+                    DateTime slotStart = rangeStart.AddDays(dayIndex);
+                    DateTime slotEnd = slotStart.AddDays(1);
+                    DateTime overlapStart = start > slotStart ? start : slotStart;
+                    DateTime overlapEnd = end < slotEnd ? end : slotEnd;
+                    if (overlapEnd > overlapStart)
+                        intervalsByDay[dayIndex].Add((overlapStart, overlapEnd));
+                }
+            }
+
+            var values = new List<double>(daysToShow);
+            var labels = new List<string>(daysToShow);
+            DateTime today = DateTime.Today;
+            double maxValue = 0;
+
+            for (int dayIndex = 0; dayIndex < daysToShow; dayIndex++)
+            {
+                var merged = TimeUtil.MergeIntervals(intervalsByDay[dayIndex]);
+                double hours = 0;
+                foreach (var interval in merged)
+                    hours += (interval.End - interval.Start).TotalHours;
+
+                hours = Math.Clamp(hours, 0, 24);
+                values.Add(hours);
+                maxValue = Math.Max(maxValue, hours);
+
+                DateTime date = rangeStart.AddDays(dayIndex);
+                labels.Add(date == today
+                    ? "Today"
+                    : date == today.AddDays(-1)
+                        ? "Yesterday"
+                        : date.ToString("MMM d"));
+            }
+
+            double yAxisMax;
+            if (maxValue < 0.005) yAxisMax = 1;
+            else if (maxValue < 0.5) yAxisMax = 1;
+            else yAxisMax = Math.Min(24, Math.Ceiling(maxValue * 1.2));
+
+            if (timePeriod == TimePeriod.Weekly)
+                yAxisMax = Math.Min(24, Math.Max(2, Math.Ceiling(yAxisMax / 2) * 2));
+
+            UpdateSeries(chart, values, seriesColor, maxBarWidth: 30);
+
+            int labelCount = labels.Count;
+            double minStep = Math.Max(1, Math.Ceiling(labelCount / 12d));
+            double rotation = labelCount > 12 ? 45 : 0;
+
+            chart.XAxes = new Axis[]
+            {
+                new()
+                {
+                    Labels = labels,
+                    LabelsRotation = rotation,
+                    ForceStepToMin = true,
+                    MinStep = minStep,
+                    TextSize = 11,
+                    LabelsPaint = new SolidColorPaint(axisColor),
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
+                }
+            };
+
+            chart.YAxes = new Axis[]
+            {
+                new()
+                {
+                    Name = string.Empty,
+                    NamePaint = null,
+                    LabelsPaint = new SolidColorPaint(axisColor),
+                    TextSize = 11,
+                    MinLimit = 0,
+                    MaxLimit = yAxisMax,
+                    ForceStepToMin = true,
+                    MinStep = timePeriod == TimePeriod.Weekly ? 2 : (yAxisMax > 4 ? 2 : 0.5),
+                    Labeler = TimeUtil.FormatHoursForYAxis,
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(100))
+                }
+            };
+        }
+
+        private static void UpdateSeries(
+            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart,
+            IReadOnlyCollection<double> values,
+            SKColor seriesColor,
+            double maxBarWidth)
+        {
+            if (chart.Series?.FirstOrDefault() is ColumnSeries<double> existingSeries)
+            {
+                existingSeries.Values = values;
+                existingSeries.Fill = new SolidColorPaint(seriesColor);
+                existingSeries.Stroke = null;
+                existingSeries.MaxBarWidth = maxBarWidth;
+                existingSeries.AnimationsSpeed = TimeSpan.Zero;
+                existingSeries.EasingFunction = null;
+                return;
+            }
+
+            chart.Series = new ISeries[]
+            {
+                new ColumnSeries<double>
+                {
+                    Values = values,
+                    Fill = new SolidColorPaint(seriesColor),
+                    Stroke = null,
+                    MaxBarWidth = maxBarWidth,
+                    Padding = 0,
+                    Name = "Usage",
+                    AnimationsSpeed = TimeSpan.Zero,
+                    EasingFunction = null
+                }
+            };
+        }
+
         public static TimeSpan ForceChartRefresh(
-            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart, 
+            LiveChartsCore.SkiaSharpView.WinUI.CartesianChart chart,
             ICollection<AppUsageRecord> usageRecords,
             ChartViewMode viewMode,
             TimePeriod timePeriod,
             DateTime selectedDate,
             DateTime? selectedEndDate = null)
         {
-            // Manually clear and rebuild the chart
-            if (chart != null)
-            {
-                // First clear the chart
-                chart.Series = new ISeries[] { };
-                
-                // Then update it
-                var totalTime = UpdateUsageChart(chart, usageRecords, viewMode, timePeriod, selectedDate, selectedEndDate);
-                
-                return totalTime;
-            }
-            else
-            {
+            if (chart == null)
                 return TimeSpan.Zero;
-            }
+
+            chart.Series = Array.Empty<ISeries>();
+            return UpdateUsageChart(chart, usageRecords, viewMode, timePeriod, selectedDate, selectedEndDate);
         }
     }
-} 
+}

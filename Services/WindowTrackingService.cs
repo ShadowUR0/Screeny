@@ -1,50 +1,57 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Timers;
-using ScreenTimeTracker.Models;
-using System.Diagnostics;
-using System.Collections.Generic;
-using System.Linq;
-using ScreenTimeTracker.Helpers;
 using System.Threading.Tasks;
+using System.Timers;
+using ScreenTimeTracker.Helpers;
+using ScreenTimeTracker.Models;
 using Windows.Media.Control;
-using Windows.Foundation;
 
 namespace ScreenTimeTracker.Services
 {
     public class WindowTrackingService : IDisposable
     {
+        private const int IdleThresholdSeconds = 300;
+        private static readonly TimeSpan MediaStateCacheDuration = TimeSpan.FromSeconds(5);
+
         private readonly System.Timers.Timer _timer;
-        private AppUsageRecord? _currentRecord;
-        private bool _disposed;
         private readonly object _lockObject = new object();
-        private bool _isIdle = false;
+        private AppUsageRecord? _currentRecord;
         private AppUsageRecord? _idleRecord;
+        private bool _disposed;
+        private bool _isIdle;
+        private DateTime _lastMediaStateCheckUtc = DateTime.MinValue;
+        private bool _lastMediaPlaying;
+        private GlobalSystemMediaTransportControlsSessionManager? _mediaSessionManager;
 
 #if !UNIT_TEST
-        // ---------- WinEvent hook fields ----------
         private IntPtr _focusHook = IntPtr.Zero;
         private WinEventDelegate? _winEventDelegate;
 
         private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
-        private const uint WINEVENT_OUTOFCONTEXT   = 0x0000;
+        private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
 
         private delegate void WinEventDelegate(
             IntPtr hWinEventHook,
-            uint   eventType,
+            uint eventType,
             IntPtr hwnd,
-            int    idObject,
-            int    idChild,
-            uint   dwEventThread,
-            uint   dwmsEventTime);
+            int idObject,
+            int idChild,
+            uint dwEventThread,
+            uint dwmsEventTime);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetWinEventHook(
-            uint eventMin, uint eventMax,
+            uint eventMin,
+            uint eventMax,
             IntPtr hmodWinEventProc,
             WinEventDelegate lpfnWinEventProc,
-            uint idProcess, uint idThread, uint dwFlags);
+            uint idProcess,
+            uint idThread,
+            uint dwFlags);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -74,53 +81,33 @@ namespace ScreenTimeTracker.Services
             public uint dwTime;
         }
 
-        // Helper – returns user idle time in seconds
-        private static int GetIdleSeconds()
-        {
-            LASTINPUTINFO li = new LASTINPUTINFO();
-            li.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
-            return GetLastInputInfo(ref li) ? (Environment.TickCount - (int)li.dwTime) / 1000 : 0;
-        }
-
-        // Helper to detect any system media session that is actively playing
-        private static bool IsAnyMediaPlaying()
-        {
-            try
-            {
-                var mgr = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().GetAwaiter().GetResult();
-                foreach (var session in mgr.GetSessions())
-                {
-                    var info = session.GetPlaybackInfo();
-                    if (info != null && info.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
-                        return true;
-                }
-            }
-            catch { /* ignore environments where API not available */ }
-            return false;
-        }
-
         public event EventHandler<AppUsageRecord>? UsageRecordUpdated;
         public event EventHandler? WindowChanged;
         public event EventHandler<UsageSlice>? UsageSliceFinalized;
-        
+
         public bool IsTracking { get; private set; }
         public AppUsageRecord? CurrentRecord => _currentRecord;
 
         public WindowTrackingService()
         {
-
-            _timer = new System.Timers.Timer(500);
+            // Foreground changes are event-driven. A two-second maintenance tick is
+            // sufficient for idle detection/day rollover and keeps background wakeups low.
+            _timer = new System.Timers.Timer(2000);
             _timer.Elapsed += Timer_Elapsed;
             _timer.AutoReset = true;
-            
-            IsTracking = false;
+
             Debug.WriteLine("WindowTrackingService initialized.");
 
 #if !UNIT_TEST
-            // Register foreground-window change hook
             _winEventDelegate = OnWinEvent;
-            _focusHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-                                         IntPtr.Zero, _winEventDelegate, 0, 0, WINEVENT_OUTOFCONTEXT);
+            _focusHook = SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                IntPtr.Zero,
+                _winEventDelegate,
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT);
 #endif
         }
 
@@ -131,11 +118,10 @@ namespace ScreenTimeTracker.Services
                 ThrowIfDisposed();
                 if (IsTracking) return;
 
-                _timer.Start();
                 IsTracking = true;
+                _timer.Start();
             }
-            
-            // Call CheckActiveWindow outside of lock to avoid deadlock
+
             CheckActiveWindow();
         }
 
@@ -148,7 +134,6 @@ namespace ScreenTimeTracker.Services
 
                 _timer.Stop();
                 IsTracking = false;
-
                 FinalizeOpenRecords(DateTime.Now);
             }
         }
@@ -162,7 +147,6 @@ namespace ScreenTimeTracker.Services
 
                 _timer.Stop();
                 IsTracking = false;
-
                 FinalizeOpenRecords(DateTime.Now);
             }
         }
@@ -177,55 +161,94 @@ namespace ScreenTimeTracker.Services
                 IsTracking = true;
                 _timer.Start();
             }
-            
-            // Call CheckActiveWindow outside of lock to avoid deadlock
+
             CheckActiveWindow();
+        }
+
+        private static int GetIdleSeconds()
+        {
+            var li = new LASTINPUTINFO
+            {
+                cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>()
+            };
+
+            if (!GetLastInputInfo(ref li))
+            {
+                return 0;
+            }
+
+            uint elapsedMilliseconds = unchecked((uint)Environment.TickCount - li.dwTime);
+            return (int)(elapsedMilliseconds / 1000U);
+        }
+
+        private bool IsAnyMediaPlaying(DateTime utcNow)
+        {
+            if (utcNow - _lastMediaStateCheckUtc < MediaStateCacheDuration)
+            {
+                return _lastMediaPlaying;
+            }
+
+            bool mediaPlaying = false;
+            try
+            {
+                _mediaSessionManager ??=
+                    GlobalSystemMediaTransportControlsSessionManager.RequestAsync().GetAwaiter().GetResult();
+
+                foreach (var session in _mediaSessionManager.GetSessions())
+                {
+                    var info = session.GetPlaybackInfo();
+                    if (info?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                    {
+                        mediaPlaying = true;
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                _mediaSessionManager = null;
+            }
+
+            _lastMediaPlaying = mediaPlaying;
+            _lastMediaStateCheckUtc = utcNow;
+            return mediaPlaying;
         }
 
         private void Timer_Elapsed(object? sender, ElapsedEventArgs e)
         {
-            // Lightweight tick: idle detection, active-window check, live duration update, day rollover.
             try
             {
-                // ----- Idle detection -----
-                int idleSec = GetIdleSeconds();
-                bool mediaPlaying = IsAnyMediaPlaying();
-                bool currentlyIdle = idleSec > 300 && !mediaPlaying; // 5 minutes idle pause
-                bool shouldRefreshActiveWindow = false;
+                DateTime now = DateTime.Now;
+                int idleSeconds = GetIdleSeconds();
+
+                bool mediaPlaying = idleSeconds > IdleThresholdSeconds && IsAnyMediaPlaying(DateTime.UtcNow);
+                bool currentlyIdle = idleSeconds > IdleThresholdSeconds && !mediaPlaying;
+                bool shouldRefreshActiveWindow;
 
                 lock (_lockObject)
                 {
                     if (!IsTracking || _disposed) return;
-
-                    shouldRefreshActiveWindow = ApplyIdleState(currentlyIdle, DateTime.Now);
+                    shouldRefreshActiveWindow = ApplyIdleState(currentlyIdle, now);
                 }
 
-                if (currentlyIdle) return; // Skip heavy work while idle
+                if (currentlyIdle)
+                {
+                    return;
+                }
 
                 if (shouldRefreshActiveWindow)
                 {
                     CheckActiveWindow();
                 }
 
-                // ----- Active-window tracking -----
-                // Real-time events handle window changes, timer only does duration updates
-
-                // ----- Live-duration update & day rollover -----
                 lock (_lockObject)
                 {
-                    UpdateFocusedRecord(DateTime.Now);
-                }
-
-                // Update idle duration if still in idle
-                if (_idleRecord != null)
-                {
-                    _idleRecord._accumulatedDuration = DateTime.Now - _idleRecord.StartTime;
-                    UsageRecordUpdated?.Invoke(this, _idleRecord);
+                    UpdateFocusedRecord(now);
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"ERROR in Timer_Elapsed: {ex.Message}");
+                Debug.WriteLine($"ERROR in Timer_Elapsed: {ex.Message}");
             }
         }
 
@@ -233,102 +256,77 @@ namespace ScreenTimeTracker.Services
         {
             lock (_lockObject)
             {
-                if (!IsTracking || _disposed)
-                {
-                    return;
-                }
+                if (!IsTracking || _disposed) return;
             }
 
             try
             {
                 var foregroundWindow = GetForegroundWindow();
                 if (foregroundWindow == IntPtr.Zero || !IsWindow(foregroundWindow)) return;
-                uint processId;
-                GetWindowThreadProcessId(foregroundWindow, out processId);
-                if (processId == 0) return;
-                var windowTitle = GetActiveWindowTitle(foregroundWindow);
-                var processName = GetProcessName(foregroundWindow);
 
+                GetWindowThreadProcessId(foregroundWindow, out uint processId);
+                if (processId == 0) return;
+
+                string windowTitle = GetActiveWindowTitle(foregroundWindow);
+                string processName = GetProcessName((int)processId);
                 ProcessWindowChange(foregroundWindow, (int)processId, processName, windowTitle);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"ERROR in CheckActiveWindow: {ex.Message}");
+                Debug.WriteLine($"ERROR in CheckActiveWindow: {ex.Message}");
             }
         }
 
-        private string GetActiveWindowTitle(IntPtr handle)
+        private static string GetActiveWindowTitle(IntPtr handle)
         {
             try
             {
-                // Validate handle before using it
                 if (handle == IntPtr.Zero || !IsWindow(handle))
                 {
                     return string.Empty;
                 }
-                
+
                 const int nChars = 256;
-                StringBuilder buff = new StringBuilder(nChars);
-                if (GetWindowText(handle, buff, nChars) > 0)
-                {
-                    return buff.ToString();
-                }
+                var buffer = new StringBuilder(nChars);
+                return GetWindowText(handle, buffer, nChars) > 0 ? buffer.ToString() : string.Empty;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"ERROR in GetActiveWindowTitle: {ex.Message}");
+                Debug.WriteLine($"ERROR in GetActiveWindowTitle: {ex.Message}");
+                return string.Empty;
             }
-            return string.Empty;
         }
 
-        private string GetProcessName(IntPtr handle)
+        private static string GetProcessName(int processId)
         {
-            if (handle == IntPtr.Zero)
-                return "Unknown";
+            if (processId <= 0) return "Unknown";
 
             try
             {
-                // Validate handle before using it
-                if (!IsWindow(handle))
-                {
-                    System.Diagnostics.Debug.WriteLine("GetProcessName - Invalid window handle");
-                    return "Unknown";
-                }
-                
-                uint processId;
-                GetWindowThreadProcessId(handle, out processId);
-                if (processId == 0)
-                    return "Unknown";
-
-                using (var process = System.Diagnostics.Process.GetProcessById((int)processId))
-                {
-                    return process.ProcessName;
-                }
+                using var process = Process.GetProcessById(processId);
+                return process.ProcessName;
             }
             catch (ArgumentException ex)
             {
-                // Process has exited
-                System.Diagnostics.Debug.WriteLine($"Process has exited: {ex.Message}");
-                return "Unknown";
+                Debug.WriteLine($"Process has exited: {ex.Message}");
             }
             catch (InvalidOperationException ex)
             {
-                // Process has exited or access denied
-                System.Diagnostics.Debug.WriteLine($"Cannot access process: {ex.Message}");
-                return "Unknown";
+                Debug.WriteLine($"Cannot access process: {ex.Message}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"ERROR in GetProcessName: {ex.Message}");
-                return "Unknown";
+                Debug.WriteLine($"ERROR in GetProcessName: {ex.Message}");
             }
+
+            return "Unknown";
         }
 
         public IEnumerable<AppUsageRecord> GetRecords()
         {
             lock (_lockObject)
             {
-                var live = new List<AppUsageRecord>();
+                var live = new List<AppUsageRecord>(2);
                 if (_currentRecord != null) live.Add(_currentRecord.CreateSnapshot());
                 if (_idleRecord != null) live.Add(_idleRecord.CreateSnapshot());
                 return live;
@@ -341,14 +339,15 @@ namespace ScreenTimeTracker.Services
             record.EndTime = endTime;
 
             if (UsageSlice.TryCreate(
-                record.ProcessName,
-                record.ApplicationName,
-                record.WindowTitle,
-                record.StartTime,
-                endTime,
-                out var slice) && slice != null)
+                    record.ProcessName,
+                    record.ApplicationName,
+                    record.WindowTitle,
+                    record.StartTime,
+                    endTime,
+                    out var slice) &&
+                slice != null)
             {
-                UsageSliceFinalized?.Invoke(this, slice);
+                UsageSliceFinalized?.Invoke(this, slice with { ExecutablePath = record.ExecutablePath });
             }
         }
 
@@ -376,14 +375,15 @@ namespace ScreenTimeTracker.Services
                 return;
             }
 
-            _currentRecord.RaiseDurationChanged();
+            // Do not raise PropertyChanged from this System.Timers background thread.
+            // The UI handler receives this event and updates the bound record on the
+            // DispatcherQueue, avoiding duplicate notifications and cross-thread churn.
             UsageRecordUpdated?.Invoke(this, _currentRecord);
 
-            // Detect midnight crossover
             if (_currentRecord.Date < now.Date)
             {
-                var endOfPrevDay = _currentRecord.Date.AddDays(1).AddSeconds(-1);
-                FinalizeRecord(_currentRecord, endOfPrevDay);
+                var endOfPreviousDay = _currentRecord.Date.AddDays(1).AddSeconds(-1);
+                FinalizeRecord(_currentRecord, endOfPreviousDay);
                 _currentRecord = null;
             }
         }
@@ -479,63 +479,74 @@ namespace ScreenTimeTracker.Services
         {
             lock (_lockObject)
             {
-                if (!_disposed)
+                if (_disposed) return;
+
+                try
                 {
-                    // Stop and dispose timer first to prevent any more events
-                    try
-                    {
-                        _timer.Stop();
-                        _timer.Elapsed -= Timer_Elapsed;
-                        _timer.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Error disposing timer: {ex.Message}");
-                    }
-                    
-                    IsTracking = false;
-                    _currentRecord = null;
-                    _disposed = true;
+                    _timer.Stop();
+                    _timer.Elapsed -= Timer_Elapsed;
+                    _timer.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error disposing timer: {ex.Message}");
+                }
+
+                IsTracking = false;
+                _currentRecord = null;
+                _idleRecord = null;
+                _mediaSessionManager = null;
+                _disposed = true;
 
 #if !UNIT_TEST
-                    if (_focusHook != IntPtr.Zero)
+                if (_focusHook != IntPtr.Zero)
+                {
+                    try
                     {
-                        try { UnhookWinEvent(_focusHook); } catch { }
-                        _focusHook = IntPtr.Zero;
-                        _winEventDelegate = null;
+                        UnhookWinEvent(_focusHook);
                     }
-#endif
+                    catch
+                    {
+                    }
 
+                    _focusHook = IntPtr.Zero;
+                    _winEventDelegate = null;
                 }
+#endif
             }
         }
 
-        private DateTime EnsureValidDate(DateTime date)
+        private static DateTime EnsureValidDate(DateTime date)
         {
             if (date > DateTime.Today)
             {
-                System.Diagnostics.Debug.WriteLine($"WARNING: Future date detected ({date:yyyy-MM-dd}), using current date instead.");
+                Debug.WriteLine($"WARNING: Future date detected ({date:yyyy-MM-dd}), using current date instead.");
                 return DateTime.Today;
             }
+
             return date;
         }
 
 #if !UNIT_TEST
-        // ---------- WinEvent hook callback ----------
-        private void OnWinEvent(IntPtr hWinEventHook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+        private void OnWinEvent(
+            IntPtr hWinEventHook,
+            uint eventType,
+            IntPtr hwnd,
+            int idObject,
+            int idChild,
+            uint thread,
+            uint time)
         {
             if (eventType == EVENT_SYSTEM_FOREGROUND && hwnd != IntPtr.Zero)
             {
-                // Process on thread-pool to avoid blocking WinEvent thread
                 Task.Run(() => CheckActiveWindow(hwnd));
             }
         }
 
-        // Overload that skips GetForegroundWindow and uses supplied handle
         private void CheckActiveWindow(IntPtr foregroundWindow)
         {
             if (foregroundWindow == IntPtr.Zero) return;
-            // Reuse main logic by moving body to shared method if possible; for now duplicate minimal parts
+
             lock (_lockObject)
             {
                 if (!IsTracking || _disposed) return;
@@ -545,32 +556,38 @@ namespace ScreenTimeTracker.Services
             {
                 if (!IsWindow(foregroundWindow)) return;
 
-                uint processId;
-                GetWindowThreadProcessId(foregroundWindow, out processId);
+                GetWindowThreadProcessId(foregroundWindow, out uint processId);
                 if (processId == 0) return;
 
-                var windowTitle = GetActiveWindowTitle(foregroundWindow);
-                var processName = GetProcessName(foregroundWindow);
-
-                // Rest of logic identical to existing method -> call helper to reduce duplication
+                string windowTitle = GetActiveWindowTitle(foregroundWindow);
+                string processName = GetProcessName((int)processId);
                 ProcessWindowChange(foregroundWindow, (int)processId, processName, windowTitle);
             }
-            catch (Exception ex) 
-            { 
-                System.Diagnostics.Debug.WriteLine($"Error in window tracking callback: {ex.Message}");
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in window tracking callback: {ex.Message}");
             }
         }
 #endif
 
-        // Extracted shared logic from original CheckActiveWindow body starting after obtaining names
         private void ProcessWindowChange(IntPtr foregroundWindow, int processId, string processName, string windowTitle)
         {
             lock (_lockObject)
             {
-                // If the same window remains focused, nothing to do
+                if (ProcessFilter.ShouldIgnoreProcess(processName))
+                {
+                    if (_currentRecord != null)
+                    {
+                        FinalizeRecord(_currentRecord, DateTime.Now);
+                        UsageRecordUpdated?.Invoke(this, _currentRecord);
+                        _currentRecord = null;
+                    }
+                    return;
+                }
+
                 if (_currentRecord != null &&
                     _currentRecord.WindowHandle == foregroundWindow &&
-                    _currentRecord.ProcessId   == processId        &&
+                    _currentRecord.ProcessId == processId &&
                     _currentRecord.WindowTitle == windowTitle)
                 {
                     if (!_currentRecord.IsFocused)
@@ -578,27 +595,29 @@ namespace ScreenTimeTracker.Services
                         _currentRecord.SetFocus(true);
                         UsageRecordUpdated?.Invoke(this, _currentRecord);
                     }
+
                     return;
                 }
 
-                // Finalise previous slice
+                DateTime now = DateTime.Now;
+
                 if (_currentRecord != null)
                 {
-                    FinalizeRecord(_currentRecord, DateTime.Now);
+                    FinalizeRecord(_currentRecord, now);
                     UsageRecordUpdated?.Invoke(this, _currentRecord);
                 }
 
-                // Start new slice
                 _currentRecord = new AppUsageRecord
                 {
-                    ProcessName    = processName,
-                    WindowTitle    = windowTitle,
-                    StartTime      = DateTime.Now,
-                    ProcessId      = processId,
-                    WindowHandle   = foregroundWindow,
-                    Date           = EnsureValidDate(DateTime.Now.Date),
-                    ApplicationName= processName
+                    ProcessName = processName,
+                    WindowTitle = windowTitle,
+                    StartTime = now,
+                    ProcessId = processId,
+                    WindowHandle = foregroundWindow,
+                    Date = EnsureValidDate(now.Date),
+                    ApplicationName = processName
                 };
+
                 ApplicationProcessingHelper.ProcessApplicationRecord(_currentRecord);
                 _currentRecord.SetFocus(true);
                 UsageRecordUpdated?.Invoke(this, _currentRecord);
@@ -606,4 +625,4 @@ namespace ScreenTimeTracker.Services
             }
         }
     }
-} 
+}

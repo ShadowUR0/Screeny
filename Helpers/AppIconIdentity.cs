@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using ScreenTimeTracker.Models;
 
 namespace ScreenTimeTracker.Helpers
@@ -7,6 +8,9 @@ namespace ScreenTimeTracker.Helpers
         public static string CreateProcessCacheKey(AppUsageRecord record)
         {
             ArgumentNullException.ThrowIfNull(record);
+
+            if (!string.IsNullOrWhiteSpace(record.ExecutablePath))
+                return record.ExecutablePath.Trim().ToLowerInvariant();
 
             var stableProcessName = ApplicationNameNormalizer.NormalizeProcessName(record.ProcessName);
             return stableProcessName.Trim().ToLowerInvariant();

@@ -1,0 +1,61 @@
+; Modified in the ShadowUR0 Screeny fork in 2026.
+#define MyAppName "Screeny"
+#define MyAppVersion "1.8.3"
+#define MyAppExeName "Screeny.exe"
+
+[Setup]
+AppId={{A7B6D948-8F70-4ED4-B072-1979969F0741}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
+DefaultDirName={localappdata}\Programs\Screeny
+DefaultGroupName=Screeny
+DisableProgramGroupPage=yes
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+OutputDir=..\artifacts
+OutputBaseFilename=Screeny-Setup
+SetupIconFile=..\Assets\screeny icon.ico
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+CloseApplications=yes
+RestartApplications=no
+UninstallDisplayIcon={app}\{#MyAppExeName}
+
+[Files]
+Source: "..\bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\artifacts\third-party\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
+[Icons]
+Name: "{group}\Screeny"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Screeny"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExistingExe: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  ExistingExe := ExpandConstant('{app}\{#MyAppExeName}');
+
+  if FileExists(ExistingExe) then
+  begin
+    if not Exec(ExistingExe, '--shutdown-for-update', ExpandConstant('{app}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      Result := 'Screeny could not be prepared for update. Close it and run the installer again.';
+      exit;
+    end;
+
+    if ResultCode <> 0 then
+      Result := 'Screeny is still running. Close it and run the installer again.';
+  end;
+end;

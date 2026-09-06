@@ -1,0 +1,65 @@
+# Modified in the ShadowUR0 Screeny fork in 2026.
+name: Windows build
+
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore ScreenTimeTracker.sln
+
+      - name: Build
+        run: dotnet build ScreenTimeTracker.sln -c Release --no-restore -p:AppxPackageSigningEnabled=false
+
+      - name: Audit vulnerable packages
+        shell: pwsh
+        run: |
+          $output = dotnet list ScreenTimeTracker.csproj package --vulnerable --include-transitive
+          $output
+          if ($output -match 'has the following vulnerable packages') {
+            Write-Error 'Vulnerable NuGet packages detected.'
+            exit 1
+          }
+
+      - name: Collect third-party license notices
+        shell: pwsh
+        run: ./tools/CollectThirdPartyNotices.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build upgradeable installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) {
+            throw "Inno Setup compiler not found at $iscc"
+          }
+          & $iscc 'installer\Screeny.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Screeny-setup-x64
+          path: artifacts/Screeny-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

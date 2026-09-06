@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 namespace ScreenTimeTracker.Models
 {
     public sealed record UsageSlice(
@@ -9,6 +10,8 @@ namespace ScreenTimeTracker.Models
         TimeSpan Duration,
         DateTime Date)
     {
+        public string ExecutablePath { get; init; } = string.Empty;
+
         public static bool TryCreate(
             string processName,
             string applicationName,

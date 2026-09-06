@@ -1,8 +1,8 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using System;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using System.Threading.Tasks;
-using Microsoft.UI.Dispatching;
 using ScreenTimeTracker.Models;
 using System.Linq;
 using Microsoft.UI.Xaml.Controls;
@@ -12,14 +12,8 @@ using ScreenTimeTracker.Helpers;
 
 namespace ScreenTimeTracker
 {
-    // This partial class will gradually absorb lifecycle logic, services, timers, and power-event handling
-    // migrated out of the original MainWindow.xaml.cs. For now it is an empty placeholder to keep the project
-    // compiling while we refactor incrementally.
     public sealed partial class MainWindow
     {
-        // ---------------- Power-notification plumbing ----------------
-        // These were moved out of the giant code-behind to keep UI file lean.
-        
         private void RegisterPowerNotifications()
         {
             if (_hWnd == IntPtr.Zero)
@@ -30,27 +24,15 @@ namespace ScreenTimeTracker
 
             try
             {
-                Guid consoleGuid = GuidConsoleDisplayState; // Need local copy for ref parameter
+                Guid consoleGuid = GuidConsoleDisplayState;
                 _hConsoleDisplayState = RegisterPowerSettingNotification(_hWnd, ref consoleGuid, DEVICE_NOTIFY_WINDOW_HANDLE);
                 if (_hConsoleDisplayState == IntPtr.Zero)
-                {
                     System.Diagnostics.Debug.WriteLine($"Failed to register for GuidConsoleDisplayState. Error: {Marshal.GetLastWin32Error()}");
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine("Successfully registered for GuidConsoleDisplayState.");
-                }
 
-                Guid awayGuid = GuidSystemAwayMode; // Need local copy for ref parameter
+                Guid awayGuid = GuidSystemAwayMode;
                 _hSystemAwayMode = RegisterPowerSettingNotification(_hWnd, ref awayGuid, DEVICE_NOTIFY_WINDOW_HANDLE);
                 if (_hSystemAwayMode == IntPtr.Zero)
-                {
                     System.Diagnostics.Debug.WriteLine($"Failed to register for GuidSystemAwayMode. Error: {Marshal.GetLastWin32Error()}");
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine("Successfully registered for GuidSystemAwayMode.");
-                }
             }
             catch (Exception ex)
             {
@@ -64,18 +46,13 @@ namespace ScreenTimeTracker
             {
                 if (_hConsoleDisplayState != IntPtr.Zero)
                 {
-                    if (UnregisterPowerSettingNotification(_hConsoleDisplayState))
-                        System.Diagnostics.Debug.WriteLine("Successfully unregistered GuidConsoleDisplayState.");
-                    else
-                        System.Diagnostics.Debug.WriteLine($"Failed to unregister GuidConsoleDisplayState. Error: {Marshal.GetLastWin32Error()}");
+                    UnregisterPowerSettingNotification(_hConsoleDisplayState);
                     _hConsoleDisplayState = IntPtr.Zero;
                 }
+
                 if (_hSystemAwayMode != IntPtr.Zero)
                 {
-                    if (UnregisterPowerSettingNotification(_hSystemAwayMode))
-                        System.Diagnostics.Debug.WriteLine("Successfully unregistered GuidSystemAwayMode.");
-                    else
-                        System.Diagnostics.Debug.WriteLine($"Failed to unregister GuidSystemAwayMode. Error: {Marshal.GetLastWin32Error()}");
+                    UnregisterPowerSettingNotification(_hSystemAwayMode);
                     _hSystemAwayMode = IntPtr.Zero;
                 }
             }
@@ -85,74 +62,51 @@ namespace ScreenTimeTracker
             }
         }
 
-        // ---------------- Lifecycle & disposal ----------------
         public void Dispose()
         {
-            if (!_disposed)
+            if (_disposed) return;
+
+            _trayIconHelper?.Dispose();
+            UnregisterPowerNotifications();
+            RestoreWindowProc();
+
+            if (_appWindow != null)
+                _appWindow.Closing -= AppWindow_Closing;
+
+            _trackingService?.StopTracking();
+            _updateTimer?.Stop();
+            _usageRecords?.Clear();
+
+            _trackingService?.Dispose();
+            _databaseService?.Dispose();
+
+            if (_updateTimer != null) _updateTimer.Tick -= UpdateTimer_Tick;
+            if (_trackingService != null)
             {
-                // Dispose Tray Icon Helper FIRST to remove icon
-                _trayIconHelper?.Dispose();
-
-                // Unregister power notifications
-                UnregisterPowerNotifications();
-
-                // Restore original window procedure
-                RestoreWindowProc();
-
-                // Unsubscribe from AppWindow event
-                if (_appWindow != null)
-                {
-                    _appWindow.Closing -= AppWindow_Closing;
-                }
-
-                // Stop services
-                _trackingService?.StopTracking();
-                _updateTimer?.Stop();
-
-
-                // Clear collections
-                _usageRecords?.Clear();
-
-                // Dispose services
-                _trackingService?.Dispose();
-                _databaseService?.Dispose();
-
-                // Remove event handlers
-                if (_updateTimer != null) _updateTimer.Tick -= UpdateTimer_Tick;
-                if (_trackingService != null)
-                {
-                    _trackingService.WindowChanged -= TrackingService_WindowChanged;
-                    _trackingService.UsageRecordUpdated -= TrackingService_UsageRecordUpdated;
-                    _trackingService.UsageSliceFinalized -= TrackingService_UsageSliceFinalized;
-                }
-                if (Content is FrameworkElement root) root.Loaded -= MainWindow_Loaded;
-                if (_trayIconHelper != null)
-                {
-                    _trayIconHelper.ShowClicked -= TrayIcon_ShowClicked;
-                    _trayIconHelper.ExitClicked -= TrayIcon_ExitClicked;
-                }
-
-                _disposed = true;
+                _trackingService.WindowChanged -= TrackingService_WindowChanged;
+                _trackingService.UsageRecordUpdated -= TrackingService_UsageRecordUpdated;
+                _trackingService.UsageSliceFinalized -= TrackingService_UsageSliceFinalized;
             }
+
+            if (Content is FrameworkElement root) root.Loaded -= MainWindow_Loaded;
+            if (_trayIconHelper != null)
+            {
+                _trayIconHelper.ShowClicked -= TrayIcon_ShowClicked;
+                _trayIconHelper.ExitClicked -= TrayIcon_ExitClicked;
+            }
+
+            _disposed = true;
         }
 
-        /// <summary>
-        /// Called from App.OnSuspending to pause tracking and save data.
-        /// </summary>
         public void PrepareForSuspend()
         {
             try
             {
                 if (_viewModel.SelectedDate > DateTime.Today)
-                {
-                    System.Diagnostics.Debug.WriteLine($"WARNING: Future date detected ({_viewModel.SelectedDate:yyyy-MM-dd}), resetting to today.");
                     _viewModel.SelectedDate = DateTime.Today;
-                }
 
                 if (_trackingService != null && _trackingService.IsTracking)
-                {
-                    _trackingService?.StopTracking();
-                }
+                    _trackingService.StopTracking();
             }
             catch (Exception ex)
             {
@@ -166,11 +120,20 @@ namespace ScreenTimeTracker
             {
                 CleanupSystemProcesses();
 
+                // Finalized slices are persisted immediately by TrackingService_UsageSliceFinalized.
+                // The old five-minute path rebuilt the entire list from SQLite even though there
+                // was nothing left to "save", causing avoidable DB, icon and layout work.
+                _isChartDirty = true;
+                UpdateSummaryTab(_usageRecords.ToList());
+
+                // Perform the expensive integrity/ANALYZE maintenance at most about once per
+                // day while Screeny stays running. Five-minute refreshes are frequent enough
+                // for UI housekeeping, but full database checks do not belong on an hourly path.
                 _autoSaveCycleCount++;
-                if (_autoSaveCycleCount >= 12 && _databaseService != null)
+                if (_autoSaveCycleCount >= 288 && _databaseService != null)
                 {
                     _autoSaveCycleCount = 0;
-                    Task.Run(() =>
+                    _ = Task.Run(() =>
                     {
                         try
                         {
@@ -182,41 +145,24 @@ namespace ScreenTimeTracker
                         }
                     });
                 }
-
-                if (_viewModel.SelectedDate.Date == DateTime.Now.Date && _viewModel.CurrentTimePeriod == TimePeriod.Daily)
-                {
-                    LoadRecordsForDate(_viewModel.SelectedDate);
-                }
-                else
-                {
-                    UpdateUsageChart();
-                    UpdateSummaryTab(_usageRecords.ToList());
-                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error in auto-save: {ex}");
+                System.Diagnostics.Debug.WriteLine($"Error in periodic maintenance: {ex}");
             }
         }
 
-        // ---------------- Tracking control logic ----------------
         private void StartTracking()
         {
             ThrowIfDisposed();
             try
             {
                 _trackingService?.StartTracking();
-
-                // Start/Stop buttons are collapsed; tracking indicator handles state.
-
-                // Start unified timer
                 _updateTimer.Start();
-                _isChartDirty = true; // force initial chart render
+                _isChartDirty = true;
 
                 UpdateUsageChart();
                 UpdateSummaryTab(_usageRecords.ToList());
-
-                // Sync ViewModel state
                 _viewModel.IsTracking = true;
             }
             catch (Exception ex)
@@ -234,42 +180,23 @@ namespace ScreenTimeTracker
                     _ = dialog.ShowAsync();
                 }
             }
-            finally
-            {
-                // Tracking indicator now handled via data bindings (no imperative update needed)
-            }
         }
 
         private void StopTracking()
         {
             ThrowIfDisposed();
             _trackingService?.StopTracking();
-
             _viewModel.IsTracking = false;
 
-            // Unfocus all UI records
-            foreach (var record in _usageRecords) record.SetFocus(false);
+            foreach (var record in _usageRecords)
+                record.SetFocus(false);
 
-            // Stop timer
             _updateTimer.Stop();
-
             CleanupSystemProcesses();
-
-            // Update summary and chart
             UpdateSummaryTab(_usageRecords.ToList());
             UpdateUsageChart();
-            // Tracking indicator handled via binding; no imperative call.
         }
 
-        // Helper to retrieve current live records for today
-        private List<AppUsageRecord> GetLiveRecordsForToday()
-        {
-            return _trackingService?.GetRecords()
-                       ?.Where(r => r.IsFromDate(DateTime.Today))
-                       ?.ToList() ?? new List<AppUsageRecord>();
-        }
-
-        // ---------------- Data loading logic ----------------
         private void LoadRecordsForDate(DateTime date)
         {
             if (date > DateTime.Today) date = DateTime.Today;
@@ -277,42 +204,43 @@ namespace ScreenTimeTracker
             _viewModel.SelectedDate = date;
             _viewModel.SelectedEndDate = null;
             _viewModel.IsDateRangeSelected = false;
-
             _usageRecords.Clear();
 
-            // Update header text (Today/Yesterday/etc.)
             if (DateDisplay != null)
             {
                 var today = DateTime.Today;
                 var yesterday = today.AddDays(-1);
-                if (date == today)      DateDisplay.Text = "Today";
+                if (date == today) DateDisplay.Text = "Today";
                 else if (date == yesterday) DateDisplay.Text = "Yesterday";
                 else DateDisplay.Text = date.ToString("MMMM d");
             }
 
-            List<AppUsageRecord> records = new();
             try
             {
+                List<AppUsageRecord> records;
                 switch (_viewModel.CurrentTimePeriod)
                 {
                     case TimePeriod.Weekly:
+                    {
                         var startOfWeek = date.AddDays(-(int)date.DayOfWeek);
-                        var endOfWeek   = startOfWeek.AddDays(6);
+                        var endOfWeek = startOfWeek.AddDays(6);
                         records = BuildRecords(() => _databaseService!.GetRawRecordsForDateRange(startOfWeek, endOfWeek));
 
-                        var aggregatedWeekly = _databaseService?.GetAggregatedRecordsWithLive(startOfWeek, endOfWeek, _trackingService, includeLiveRecords: false) ?? new List<AppUsageRecord>();
+                        var aggregatedWeekly = _databaseService?.GetAggregatedRecordsWithLive(
+                            startOfWeek, endOfWeek, _trackingService, includeLiveRecords: false) ?? new List<AppUsageRecord>();
                         _viewModel.AggregatedRecords.Clear();
-                        foreach (var r in aggregatedWeekly) _viewModel.AggregatedRecords.Add(r);
+                        foreach (var record in aggregatedWeekly) _viewModel.AggregatedRecords.Add(record);
+
                         if (DateDisplay != null) DateDisplay.Text = $"{startOfWeek:MMM d} - {endOfWeek:MMM d}";
                         SummaryTitle.Text = "Weekly Screen Time Summary";
                         AveragePanel.Visibility = Visibility.Visible;
                         break;
-                    case TimePeriod.Daily:
+                    }
                     default:
                         records = BuildRecords(() => _databaseService!.GetDetailRecordsWithLive(date, _trackingService));
                         _viewModel.AggregatedRecords.Clear();
-                        foreach (var r in records) _viewModel.AggregatedRecords.Add(r);
-                        SummaryTitle.Text      = "Daily Screen Time Summary";
+                        foreach (var record in records) _viewModel.AggregatedRecords.Add(record);
+                        SummaryTitle.Text = "Daily Screen Time Summary";
                         AveragePanel.Visibility = Visibility.Collapsed;
                         break;
                 }
@@ -321,46 +249,32 @@ namespace ScreenTimeTracker
                 {
                     DispatcherQueue?.TryEnqueue(async () =>
                     {
-                        if (Content != null)
+                        if (Content == null) return;
+
+                        var dlg = new ContentDialog
                         {
-                            var dlg = new ContentDialog
-                            {
-                                Title = "No Data Available",
-                                Content = $"No usage data found for {DateDisplay?.Text ?? "the selected date"}.",
-                                CloseButtonText = "OK",
-                                XamlRoot = Content.XamlRoot
-                            };
+                            Title = "No Data Available",
+                            Content = $"No usage data found for {DateDisplay?.Text ?? "the selected date"}.",
+                            CloseButtonText = "OK",
+                            XamlRoot = Content.XamlRoot
+                        };
 
-                            // Snap immediately to today *before* showing the dialog so live data is displayed under the correct day even if the user never presses OK.
-                            if (date.Date != DateTime.Today)
-                            {
-                                _viewModel.SelectedDate = DateTime.Today;
-                                _viewModel.SelectedEndDate = null;
-                                _viewModel.IsDateRangeSelected = false;
-
-                                UpdateDatePickerButtonText(); // defined in UI partial
-                                LoadRecordsForDate(DateTime.Today);
-                            }
-
-                            await dlg.ShowAsync();
-                        }
+                        _viewModel.SelectedDate = DateTime.Today;
+                        _viewModel.SelectedEndDate = null;
+                        _viewModel.IsDateRangeSelected = false;
+                        UpdateDatePickerButtonText();
+                        LoadRecordsForDate(DateTime.Today);
+                        await dlg.ShowAsync();
                     });
                 }
 
-                foreach (var rec in records.OrderByDescending(r => r.Duration))
+                foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    rec.LoadAppIconIfNeeded();
-                    _usageRecords.Add(rec);
+                    _usageRecords.Add(record);
                 }
 
                 CleanupSystemProcesses();
-
-                DispatcherQueue?.TryEnqueue(() =>
-                {
-                    // Binding handles ItemsSource updates
-                    _isReloading = false;
-                });
-
+                _isReloading = false;
                 UpdateSummaryTab(_usageRecords.ToList());
                 UpdateChartViewMode();
             }
@@ -369,30 +283,23 @@ namespace ScreenTimeTracker
                 System.Diagnostics.Debug.WriteLine($"Error loading records: {ex.Message}");
                 DispatcherQueue?.TryEnqueue(async () =>
                 {
-                    if (Content != null)
+                    if (Content == null) return;
+                    var dlg = new ContentDialog
                     {
-                        var dlg = new ContentDialog
-                        {
-                            Title = "Error Loading Data",
-                            Content = $"Failed to load screen time data: {ex.Message}",
-                            CloseButtonText = "OK",
-                            XamlRoot = Content.XamlRoot
-                        }; await dlg.ShowAsync();
-                    }
+                        Title = "Error Loading Data",
+                        Content = $"Failed to load screen time data: {ex.Message}",
+                        CloseButtonText = "OK",
+                        XamlRoot = Content.XamlRoot
+                    };
+                    await dlg.ShowAsync();
                 });
             }
         }
 
-        // ---------------- Date range loading logic ----------------
         private void LoadRecordsForDateRange(DateTime startDate, DateTime endDate)
         {
-            // Ensure valid input range
             if (startDate > endDate)
-            {
-                var temp = startDate;
-                startDate = endDate;
-                endDate   = temp;
-            }
+                (startDate, endDate) = (endDate, startDate);
 
             _viewModel.SelectedDate = startDate;
             _viewModel.SelectedEndDate = endDate;
@@ -401,124 +308,87 @@ namespace ScreenTimeTracker
 
             try
             {
-                // Use raw records rather than per-process aggregates so the daily chart gets correct totals
                 var records = BuildRecords(() => _databaseService!.GetRawRecordsForDateRange(startDate, endDate));
-
-                // For list view we want the granular list (allRecords)
-                foreach (var rec in records.OrderByDescending(r => r.Duration))
+                foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    rec.LoadAppIconIfNeeded();
-                    _usageRecords.Add(rec);
+                    _usageRecords.Add(record);
                 }
 
-                // Build aggregated list for summary tab and average
-                var aggregated = _databaseService?.GetAggregatedRecordsWithLive(startDate, endDate, _trackingService, includeLiveRecords: false) ?? new List<AppUsageRecord>();
+                var aggregated = _databaseService?.GetAggregatedRecordsWithLive(
+                    startDate, endDate, _trackingService, includeLiveRecords: false) ?? new List<AppUsageRecord>();
 
-                // Update UI helpers
                 CleanupSystemProcesses();
                 UpdateAveragePanel(aggregated, startDate, endDate);
                 UpdateViewModeAndChartForDateRange(startDate, endDate, aggregated);
                 _isReloading = false;
 
-                // Publish aggregated list to ViewModel
                 _viewModel.AggregatedRecords.Clear();
-                foreach (var rec in aggregated) _viewModel.AggregatedRecords.Add(rec);
+                foreach (var record in aggregated) _viewModel.AggregatedRecords.Add(record);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error loading records for date range: {ex.Message}");
                 ShowErrorDialog($"Failed to load screen time data: {ex.Message}");
             }
-
-            DispatcherQueue?.TryEnqueue(() => { _isReloading = false; });
         }
 
-        // ---------------- Date-period helpers migrated from MainWindow.xaml.cs ----------------
         private int GetDayCountForTimePeriod(TimePeriod period, DateTime date)
         {
-            return period switch
-            {
-                TimePeriod.Weekly => 7,
-                _ => 1,
-            };
+            return period == TimePeriod.Weekly ? 7 : 1;
         }
 
-        /// <summary>
-        /// Calculates the total active time covered by a set of records, merging overlapping intervals so time isn't double-counted.
-        /// </summary>
         private TimeSpan CalculateTotalActiveTime(List<AppUsageRecord> records)
         {
             var intervals = records
-                .Select(r => new { Start = r.StartTime, End = r.StartTime + r.Duration })
-                .Where(iv => iv.End > iv.Start)
-                .OrderBy(iv => iv.Start)
+                .Select(record => new { Start = record.StartTime, End = record.StartTime + record.Duration })
+                .Where(interval => interval.End > interval.Start)
+                .OrderBy(interval => interval.Start)
                 .ToList();
 
             var merged = new List<(DateTime Start, DateTime End)>();
-
-            foreach (var iv in intervals)
+            foreach (var interval in intervals)
             {
-                if (!merged.Any() || iv.Start > merged.Last().End)
+                if (merged.Count == 0 || interval.Start > merged[^1].End)
                 {
-                    merged.Add((iv.Start, iv.End));
+                    merged.Add((interval.Start, interval.End));
+                    continue;
                 }
-                else
-                {
-                    var last = merged[^1];
-                    merged[^1] = (last.Start, iv.End > last.End ? iv.End : last.End);
-                }
+
+                var last = merged[^1];
+                merged[^1] = (last.Start, interval.End > last.End ? interval.End : last.End);
             }
 
             TimeSpan total = TimeSpan.Zero;
-            foreach (var span in merged)
-                total += span.End - span.Start;
-
+            foreach (var span in merged) total += span.End - span.Start;
             return total;
         }
 
-        // ---------------- Helper: Load single-day records without UI refresh ----------------
         private List<AppUsageRecord> LoadRecordsForSpecificDay(DateTime date, bool updateUI = true)
         {
             if (_databaseService == null)
-            {
-                System.Diagnostics.Debug.WriteLine("ERROR: _databaseService is null in LoadRecordsForSpecificDay. Returning empty list.");
                 return new List<AppUsageRecord>();
-            }
 
             try
             {
-                System.Diagnostics.Debug.WriteLine($"Loading records for specific day: {date:yyyy-MM-dd}");
-
                 var records = BuildRecords(() => _databaseService.GetDetailRecordsWithLive(date, _trackingService));
-
-                if (!updateUI)
-                    return records;
+                if (!updateUI) return records;
 
                 _viewModel.SelectedDate = date;
                 _viewModel.SelectedEndDate = null;
                 _viewModel.IsDateRangeSelected = false;
-
                 _usageRecords.Clear();
-
                 _isReloading = true;
 
-                foreach (var r in records.OrderByDescending(r => r.Duration))
+                foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    r.LoadAppIconIfNeeded();
-                    _usageRecords.Add(r);
+                    _usageRecords.Add(record);
                 }
 
-                // Refresh UI elements on dispatcher
                 DispatcherQueue?.TryEnqueue(() =>
                 {
                     if (_disposed) return;
-
-                    if (UsageListView != null)
-                    {
-                        UsageListView.ItemsSource = null;
-                        UsageListView.ItemsSource = _usageRecords;
-                    }
-
+                    // Keep the existing ItemsSource/binding intact so ListView recycling and
+                    // virtualization are not reset for every data refresh.
                     UpdateUsageChart();
                     UpdateSummaryTab(_usageRecords.ToList());
                     _isReloading = false;
@@ -533,20 +403,15 @@ namespace ScreenTimeTracker
             }
         }
 
-        // ---------------- Utility helpers (non-UI) ----------------
-
-        // -------------------------------------------------------------
-        // Helper: build and canonicalise record list on a background thread
-        // -------------------------------------------------------------
         private static List<AppUsageRecord> BuildRecords(Func<List<AppUsageRecord>> query)
         {
-            return Task.Run(() =>
-            {
-                var list = query();
-                foreach (var r in list)
-                    ApplicationProcessingHelper.ProcessApplicationRecord(r);
-                return list;
-            }).Result;
+            // The previous Task.Run(...).Result still blocked the UI caller while adding a
+            // thread-pool hop and synchronization. Execute once, directly, until the data
+            // loading API is made genuinely asynchronous end-to-end.
+            var list = query();
+            foreach (var record in list)
+                ApplicationProcessingHelper.ProcessApplicationRecord(record);
+            return list;
         }
     }
-} 
+}

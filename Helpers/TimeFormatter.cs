@@ -1,3 +1,6 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
+using System;
+
 namespace ScreenTimeTracker.Helpers
 {
     public static class TimeFormatter
@@ -10,18 +13,23 @@ namespace ScreenTimeTracker.Helpers
                 time = TimeSpan.FromDays(MaxReasonableDays);
             }
 
+            if (time < TimeSpan.Zero)
+            {
+                time = TimeSpan.Zero;
+            }
+
             int days = (int)time.TotalDays;
             int hours = time.Hours;
             int minutes = time.Minutes;
-            int seconds = time.Seconds;
 
             if (days > 0)
                 return $"{days}d {hours}h {minutes}m";
-            if (hours > 0)
-                return $"{hours}h {minutes}m {seconds}s";
-            if (minutes > 0)
-                return $"{minutes}m {seconds}s";
-            return $"{seconds}s";
+            if (time.TotalHours >= 1)
+                return $"{(int)time.TotalHours}h {minutes}m";
+            if (time.TotalMinutes >= 1)
+                return $"{(int)time.TotalMinutes}m";
+
+            return $"{Math.Max(0, time.Seconds)}s";
         }
     }
 }

@@ -1,0 +1,77 @@
+# Modified in the ShadowUR0 Screeny fork in 2026.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Verify tag version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content 'ScreenTimeTracker.csproj'
+          $version = [string]$project.Project.PropertyGroup.Version
+          $version = $version -replace '\.0$', ''
+          $tagVersion = '${{ github.ref_name }}'.TrimStart('v')
+          if ($version -ne $tagVersion) {
+            throw "Tag $tagVersion does not match project version $version"
+          }
+      - name: Restore
+        run: dotnet restore ScreenTimeTracker.sln
+
+      - name: Build
+        run: dotnet build ScreenTimeTracker.sln -c Release --no-restore -p:AppxPackageSigningEnabled=false
+
+      - name: Audit vulnerable packages
+        shell: pwsh
+        run: |
+          $output = dotnet list ScreenTimeTracker.csproj package --vulnerable --include-transitive
+          $output
+          if ($output -match 'has the following vulnerable packages') {
+            Write-Error 'Vulnerable NuGet packages detected.'
+            exit 1
+          }
+
+      - name: Collect third-party license notices
+        shell: pwsh
+        run: ./tools/CollectThirdPartyNotices.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          & $iscc 'installer\Screeny.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $asset = 'artifacts\Screeny-Setup.exe'
+          if (gh release view $tag *> $null) {
+            gh release upload $tag $asset --clobber
+          } else {
+            $title = "Screeny $($tag.TrimStart('v'))"
+            gh release create $tag $asset --title $title --generate-notes --verify-tag
+          }

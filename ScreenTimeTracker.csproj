@@ -1,4 +1,5 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<!-- Modified in the ShadowUR0 Screeny fork in 2026. -->
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -34,18 +35,17 @@
     <GenerateTemporaryStoreCertificate>True</GenerateTemporaryStoreCertificate>
     <AppxPackageDir>bin\AppPackages\</AppxPackageDir>
     <PackageCertificateThumbprint>5FDF281B3C45773D5346E7BF85EDC1F51FFB83D0</PackageCertificateThumbprint>
-    <Version>1.8.0.0</Version>
-    <AssemblyVersion>1.8.0.0</AssemblyVersion>
-    <FileVersion>1.8.0.0</FileVersion>
+    <Version>1.8.3.0</Version>
+    <AssemblyVersion>1.8.3.0</AssemblyVersion>
+    <FileVersion>1.8.3.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.DataGrid" Version="7.1.2" />
     <PackageReference Include="LiveChartsCore.SkiaSharpView.WinUI" Version="2.0.0-rc5.3" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.4" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.19" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250401001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
-    <PackageReference Include="ScottPlot.WinUI" Version="5.0.55" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.4" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" ExcludeAssets="all" />
   </ItemGroup>
@@ -57,17 +57,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\**">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Remove="Assets\app-icon.ico" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="Assets\app-icon.ico">
+    <!-- Keep install/runtime assets, but do not copy old branding/reference images
+         that are not consumed by the app. -->
+    <Content Include="Assets\**"
+             Exclude="Assets\microsoft.png;Assets\app-icon.svg;Assets\app-icon.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

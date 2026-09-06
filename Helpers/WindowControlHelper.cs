@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -14,7 +15,6 @@ namespace ScreenTimeTracker.Helpers
     /// </summary>
     public class WindowControlHelper
     {
-        // Win32 API constants and imports
         private const int WM_SETICON = 0x0080;
         private const int ICON_SMALL = 0;
         private const int ICON_BIG = 1;
@@ -27,21 +27,18 @@ namespace ScreenTimeTracker.Helpers
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr LoadImage(IntPtr hinst, string lpszName, int uType, int cxDesired, int cyDesired, uint fuLoad);
 
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr hWnd);
+
         private readonly Window _window;
         private readonly AppWindow _appWindow;
         private readonly OverlappedPresenter? _presenter;
         private readonly IntPtr _windowHandle;
-        private bool _isMaximized = false;
+        private bool _isMaximized;
 
-        /// <summary>
-        /// Initializes a new instance of the WindowControlHelper class
-        /// </summary>
-        /// <param name="window">The window instance to control</param>
         public WindowControlHelper(Window window)
         {
             _window = window;
-            
-            // Get the window handle and AppWindow
             _windowHandle = WindowNative.GetWindowHandle(window);
             var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_windowHandle);
             _appWindow = AppWindow.GetFromWindowId(windowId);
@@ -49,114 +46,97 @@ namespace ScreenTimeTracker.Helpers
         }
 
         /// <summary>
-        /// Sets up the window with the proper size, icon, and other properties
+        /// Sets up a comfortable activity-dashboard size. The requested dimensions are
+        /// logical DIPs, then capped to the current monitor work area so high-DPI or
+        /// smaller displays never open the window partly off-screen.
         /// </summary>
-        /// <param name="initialWidth">Initial window width</param>
-        /// <param name="initialHeight">Initial window height</param>
-        /// <param name="title">Window title</param>
-        public void SetUpWindow(double initialWidth = 1000, double initialHeight = 600, string title = "Screeny")
+        public void SetUpWindow(double initialWidth = 1040, double initialHeight = 780, string title = "Screeny")
         {
             try
             {
-                if (_appWindow != null)
+                _appWindow.Title = title;
+                _appWindow.TitleBar.ExtendsContentIntoTitleBar = true;
+                _appWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
+                _appWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+
+                SetWindowIcon();
+
+                if (_presenter != null)
                 {
-                    // Set the window title
-                    _appWindow.Title = title;
-                    
-                    // Set up title bar
-                    _appWindow.TitleBar.ExtendsContentIntoTitleBar = true;
-                    _appWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
-                    _appWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+                    _presenter.IsResizable = true;
+                    _presenter.IsMaximizable = true;
+                    _presenter.IsMinimizable = true;
+                }
 
-                    // Set the window icon
-                    SetWindowIcon();
+                try
+                {
+                    var display = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
+                    var workArea = display.WorkArea;
+                    var scale = GetScaleAdjustment();
 
-                    // Set up presenter
-                    if (_presenter != null)
-                    {
-                        _presenter.IsResizable = true;
-                        _presenter.IsMaximizable = true;
-                        _presenter.IsMinimizable = true;
-                    }
+                    int desiredWidth = (int)Math.Round(initialWidth * scale);
+                    int desiredHeight = (int)Math.Round(initialHeight * scale);
 
-                    // Set default size
-                    try
+                    // Leave a little room around the window for the taskbar and desktop.
+                    int maxWidth = Math.Max(1, (int)Math.Round(workArea.Width * 0.94));
+                    int maxHeight = Math.Max(1, (int)Math.Round(workArea.Height * 0.94));
+                    int width = Math.Min(desiredWidth, maxWidth);
+                    int height = Math.Min(desiredHeight, maxHeight);
+
+                    int x = workArea.X + Math.Max(0, (workArea.Width - width) / 2);
+                    int y = workArea.Y + Math.Max(0, (workArea.Height - height) / 2);
+
+                    _appWindow.MoveAndResize(new RectInt32(x, y, width, height));
+                }
+                catch (Exception ex)
+                {
+                    // Fall back to a taller fixed size. AppWindow.Resize consumes pixels.
+                    var scale = GetScaleAdjustment();
+                    _appWindow.Resize(new SizeInt32
                     {
-                        var display = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
-                        var scale = GetScaleAdjustment();
-                        _appWindow.Resize(new SizeInt32 { Width = (int)(initialWidth * scale), Height = (int)(initialHeight * scale) });
-                    }
-                    catch (Exception ex)
-                    {
-                        // Non-critical failure - window will use default size
-                        System.Diagnostics.Debug.WriteLine($"Failed to set window size: {ex.Message}");
-                    }
+                        Width = (int)Math.Round(initialWidth * scale),
+                        Height = (int)Math.Round(initialHeight * scale)
+                    });
+                    System.Diagnostics.Debug.WriteLine($"Display-aware window sizing fell back: {ex.Message}");
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error setting up window: {ex.Message}");
-                // Continue with default window settings
             }
         }
 
-        /// <summary>
-        /// Sets the window icon from the assets folder
-        /// </summary>
         private void SetWindowIcon()
         {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "screeny icon.ico"); 
-            System.Diagnostics.Debug.WriteLine($"Attempting to load window icon from: {iconPath}"); 
-            if (File.Exists(iconPath))
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "screeny icon.ico");
+            System.Diagnostics.Debug.WriteLine($"Attempting to load window icon from: {iconPath}");
+            if (!File.Exists(iconPath)) return;
+
+            try
             {
-                try
-                {
-                    // Let Windows choose the best size from the .ico file by specifying 0x0
-                    IntPtr smallIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
-                    if (smallIcon != IntPtr.Zero) 
-                    {
-                        SendMessage(_windowHandle, WM_SETICON, ICON_SMALL, smallIcon);
-                        System.Diagnostics.Debug.WriteLine("Set ICON_SMALL successfully (system chose size).");
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"LoadImage failed for ICON_SMALL. Error: {Marshal.GetLastWin32Error()}");
-                    }
-                    
-                    // Let Windows choose the best size for the large icon too
-                    IntPtr bigIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
-                    if (bigIcon != IntPtr.Zero)
-                    {
-                        SendMessage(_windowHandle, WM_SETICON, ICON_BIG, bigIcon);
-                        System.Diagnostics.Debug.WriteLine("Set ICON_BIG successfully (system chose size).");
-                    }
-                     else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"LoadImage failed for ICON_BIG. Error: {Marshal.GetLastWin32Error()}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Non-critical failure - continue without icon
-                    System.Diagnostics.Debug.WriteLine($"Failed to set window icon: {ex.Message}");
-                }
+                IntPtr smallIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+                if (smallIcon != IntPtr.Zero)
+                    SendMessage(_windowHandle, WM_SETICON, ICON_SMALL, smallIcon);
+                else
+                    System.Diagnostics.Debug.WriteLine($"LoadImage failed for ICON_SMALL. Error: {Marshal.GetLastWin32Error()}");
+
+                IntPtr bigIcon = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+                if (bigIcon != IntPtr.Zero)
+                    SendMessage(_windowHandle, WM_SETICON, ICON_BIG, bigIcon);
+                else
+                    System.Diagnostics.Debug.WriteLine($"LoadImage failed for ICON_BIG. Error: {Marshal.GetLastWin32Error()}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to set window icon: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Minimizes the window
-        /// </summary>
         public void MinimizeWindow()
         {
-            if (_presenter != null)
-            {
-                _presenter.Minimize();
-            }
+            _presenter?.Minimize();
         }
 
-        /// <summary>
-        /// Maximizes the window if it's not maximized, or restores it if it is
-        /// </summary>
         public void MaximizeOrRestoreWindow()
         {
             if (_presenter == null) return;
@@ -173,29 +153,23 @@ namespace ScreenTimeTracker.Helpers
             }
         }
 
-        /// <summary>
-        /// Closes the window
-        /// </summary>
         public void CloseWindow()
         {
             _window.Close();
         }
 
-        /// <summary>
-        /// Gets a scale adjustment factor based on the system DPI
-        /// </summary>
-        /// <returns>Scaling factor for window dimensions</returns>
         private double GetScaleAdjustment()
         {
-            // Get the system DPI
             try
             {
-                return _window.Content?.XamlRoot?.RasterizationScale ?? 1.0;
+                if (_windowHandle == IntPtr.Zero) return 1.0;
+                uint dpi = GetDpiForWindow(_windowHandle);
+                return dpi > 0 ? Math.Max(1.0, dpi / 96.0) : 1.0;
             }
             catch
             {
-                return 1.0; // Default to no scaling if we can't get the DPI
+                return 1.0;
             }
         }
     }
-} 
+}
