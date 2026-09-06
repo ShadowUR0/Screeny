@@ -40,12 +40,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.DataGrid" Version="7.1.2" />
     <PackageReference Include="LiveChartsCore.SkiaSharpView.WinUI" Version="2.0.0-rc5.3" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.4" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250401001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />
-    <PackageReference Include="ScottPlot.WinUI" Version="5.0.55" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.4" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" ExcludeAssets="all" />
   </ItemGroup>
@@ -57,17 +55,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\**">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Remove="Assets\app-icon.ico" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="Assets\app-icon.ico">
+    <!-- Keep install/runtime assets, but do not copy old branding/reference images
+         that are not consumed by the app. -->
+    <Content Include="Assets\**"
+             Exclude="Assets\microsoft.png;Assets\app-icon.svg;Assets\app-icon.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
