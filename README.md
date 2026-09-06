@@ -40,7 +40,6 @@ The upstream Screeny application is available through the Microsoft Store. This 
 ```powershell
 git clone https://github.com/ShadowUR0/Screeny.git
 cd Screeny
-git switch optimize-digital-wellbeing
 dotnet restore ScreenTimeTracker.sln
 dotnet build ScreenTimeTracker.sln -c Release -p:AppxPackageSigningEnabled=false
 ```
