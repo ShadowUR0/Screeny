@@ -31,3 +31,26 @@ Name: "{group}\Screeny"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Screeny"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExistingExe: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  ExistingExe := ExpandConstant('{app}\{#MyAppExeName}');
+
+  if FileExists(ExistingExe) then
+  begin
+    if not Exec(ExistingExe, '--shutdown-for-update', ExpandConstant('{app}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      Result := 'Screeny could not be prepared for update. Close it and run the installer again.';
+      exit;
+    end;
+
+    if ResultCode <> 0 then
+      Result := 'Screeny is still running. Close it and run the installer again.';
+  end;
+end;
