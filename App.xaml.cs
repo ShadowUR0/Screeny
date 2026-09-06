@@ -23,6 +23,7 @@ public partial class App : Application
     private const uint MB_ICONERROR = 0x00000010;
     private const uint MB_OK = 0x00000000;
 
+    private readonly SingleInstanceService _singleInstanceService;
     private Window? _window;
     private WindowTrackingService? _trackingService;
 
@@ -31,6 +32,16 @@ public partial class App : Application
 
     public App()
     {
+        // Acquire the process-wide guard before initializing SQLite or tracking. A second
+        // launch simply reveals the already-running Screeny window and then exits.
+        _singleInstanceService = new SingleInstanceService();
+        if (!_singleInstanceService.IsPrimaryInstance)
+        {
+            _singleInstanceService.ActivateExistingInstance();
+            Environment.Exit(0);
+            return;
+        }
+
         WriteDebugLog("Application starting...");
         StartedFromWindowsStartup = IsStartedFromWindowsStartup();
         WriteDebugLog($"Started from Windows startup: {StartedFromWindowsStartup}");
