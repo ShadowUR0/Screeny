@@ -239,8 +239,6 @@ namespace ScreenTimeTracker
             var aggregated = _databaseService?.GetAggregatedRecordsWithLive(start, end, _trackingService)
                              ?? new List<AppUsageRecord>();
 
-            _cachedTotalTime = aggregated.Aggregate(TimeSpan.Zero, (sum, record) => sum + record.Duration);
-            _lastFullRefresh = DateTime.Now;
             UpdateSummaryTab(aggregated);
         }
 
@@ -254,13 +252,17 @@ namespace ScreenTimeTracker
 
         private void UpdateSummaryTab(List<AppUsageRecord> recordsToSummarize)
         {
-            if (TotalScreenTime == null) return;
-
             TimeSpan totalTime = recordsToSummarize.Aggregate(TimeSpan.Zero, (sum, record) => sum + record.Duration);
             int maxDays = GetDayCountForTimePeriod(_viewModel.CurrentTimePeriod, _viewModel.SelectedDate);
             TimeSpan maxDuration = TimeSpan.FromHours(24 * maxDays);
             if (totalTime > maxDuration) totalTime = maxDuration;
-            TotalScreenTime.Text = TimeUtil.FormatTimeSpan(totalTime);
+
+            // Keep the one-second fast path aligned whenever a view is loaded or rebuilt.
+            _cachedTotalTime = totalTime;
+            _lastFullRefresh = DateTime.Now;
+
+            if (TotalScreenTime != null)
+                TotalScreenTime.Text = TimeUtil.FormatTimeSpan(totalTime);
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e) => _windowHelper.MinimizeWindow();
@@ -494,6 +496,7 @@ namespace ScreenTimeTracker
                 }
 
                 _isChartDirty = true;
+                UpdateSummaryTab(_usageRecords.ToList());
             }
             catch (Exception ex)
             {
