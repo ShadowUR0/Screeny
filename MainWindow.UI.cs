@@ -254,9 +254,6 @@ namespace ScreenTimeTracker
 
         private void UpdateSummaryTab(List<AppUsageRecord> recordsToSummarize)
         {
-            // The visible redesign surfaces the total in ChartTimeValue and the per-app list.
-            // Keep only the compatibility total for hidden legacy controls; the old idle/
-            // most-used calculations and icon lookup were invisible yet ran on every refresh.
             if (TotalScreenTime == null) return;
 
             TimeSpan totalTime = recordsToSummarize.Aggregate(TimeSpan.Zero, (sum, record) => sum + record.Duration);
@@ -298,12 +295,9 @@ namespace ScreenTimeTracker
                 if (_trackingService.IsTracking)
                     DoLiveUpdates();
 
-                // Rebuilding a LiveCharts scene every five seconds was unnecessary for a
-                // minute-granularity wellbeing view. App switches remain instant in the list.
                 if (_tickCount % 15 == 0 && _isChartDirty)
                     DoChartRefresh();
 
-                // The icon loader now caches failures for five minutes, so retry at the same cadence.
                 if (_tickCount % 300 == 0)
                 {
                     DoIconRetry();
@@ -432,10 +426,16 @@ namespace ScreenTimeTracker
         private void TrackingService_WindowChanged(object? sender, EventArgs e)
         {
             if (_disposed) return;
-
-            // UsageRecordUpdated already synchronizes focus and duration on the UI thread.
-            // WindowChanged only needs to request a later chart redraw.
             DispatcherQueue?.TryEnqueue(() => _isChartDirty = true);
+        }
+
+        private void ClearOtherFocus(AppUsageRecord? keep = null)
+        {
+            foreach (var item in _usageRecords)
+            {
+                if (!ReferenceEquals(item, keep) && item.IsFocused)
+                    item.SetFocus(false);
+            }
         }
 
         private void UpdateOrAddLiveRecord(AppUsageRecord record)
@@ -448,6 +448,9 @@ namespace ScreenTimeTracker
 
                 if (existing == null)
                 {
+                    if (record.IsFocused)
+                        ClearOtherFocus();
+
                     record.LoadAppIconIfNeeded();
                     _usageRecords.Add(record);
                     _isChartDirty = true;
@@ -457,16 +460,14 @@ namespace ScreenTimeTracker
                 if (!ReferenceEquals(existing, record) && record.Duration > existing.Duration)
                     existing._accumulatedDuration = record.Duration;
 
-                // Periodic updates for the already-focused app used to unfocus every row and
-                // focus it again every tick. Only touch focus when it actually changes.
                 if (record.IsFocused && !existing.IsFocused)
                 {
-                    foreach (var item in _usageRecords)
-                    {
-                        if (!ReferenceEquals(item, existing) && item.IsFocused)
-                            item.SetFocus(false);
-                    }
+                    ClearOtherFocus(existing);
                     existing.SetFocus(true);
+                }
+                else if (!record.IsFocused && existing.IsFocused)
+                {
+                    existing.SetFocus(false);
                 }
 
                 existing.RaiseDurationChanged();
