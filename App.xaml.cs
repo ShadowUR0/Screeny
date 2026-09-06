@@ -198,7 +198,7 @@ public partial class App : Application
             Environment.Exit(1);
     }
 
-    private void App_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+    private void App_UnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         LogExceptionToFile(e.Exception);
         e.Handled = true;
