@@ -16,12 +16,27 @@ namespace ScreenTimeTracker
         private static readonly string CurrentProcessName = Process.GetCurrentProcess().ProcessName;
         private bool _isLiveTotalRefreshInFlight;
         private bool _isWindowHidden = App.StartedFromWindowsStartup;
+        private string _lastHeroTimeText = string.Empty;
+
+        private void SetHeroTime(TimeSpan totalTime)
+        {
+            if (ChartTimeValue == null) return;
+
+            string formatted = TimeUtil.FormatTimeSpan(totalTime);
+            if (string.Equals(formatted, _lastHeroTimeText, StringComparison.Ordinal))
+                return;
+
+            _lastHeroTimeText = formatted;
+            ChartTimeValue.Text = formatted;
+        }
 
         private void UpdateUsageChart(AppUsageRecord? liveFocusedRecord = null)
         {
             if (UsageChartLive == null || _usageRecords == null) return;
 
-            var totalTime = ChartHelper.UpdateUsageChart(
+            // The chart and the hero total serve different purposes. Do not let chart
+            // interval/layout calculations overwrite the authoritative screen-time total.
+            ChartHelper.UpdateUsageChart(
                 UsageChartLive,
                 _usageRecords,
                 _viewModel.CurrentChartViewMode,
@@ -29,9 +44,6 @@ namespace ScreenTimeTracker
                 _viewModel.SelectedDate,
                 _viewModel.SelectedEndDate,
                 liveFocusedRecord);
-
-            if (ChartTimeValue != null)
-                ChartTimeValue.Text = TimeUtil.FormatTimeSpan(totalTime);
         }
 
         private void CleanupSystemProcesses()
@@ -39,7 +51,7 @@ namespace ScreenTimeTracker
             if (_usageRecords == null) return;
 
             var toRemove = _usageRecords
-                .Where(record => ProcessFilter.ShouldIgnoreProcess(record.ProcessName) && record.Duration.TotalSeconds < 10)
+                .Where(record => ProcessFilter.ShouldIgnoreProcess(record.ProcessName))
                 .ToList();
 
             foreach (var record in toRemove)
@@ -159,16 +171,13 @@ namespace ScreenTimeTracker
         {
             if (UsageChartLive == null) return;
 
-            var totalTime = ChartHelper.ForceChartRefresh(
+            ChartHelper.ForceChartRefresh(
                 UsageChartLive,
                 _usageRecords,
                 _viewModel.CurrentChartViewMode,
                 _viewModel.CurrentTimePeriod,
                 _viewModel.SelectedDate,
                 _viewModel.SelectedEndDate);
-
-            if (ChartTimeValue != null)
-                ChartTimeValue.Text = TimeUtil.FormatTimeSpan(totalTime);
         }
 
         private void UpdateDatePickerButtonText()
@@ -288,6 +297,7 @@ namespace ScreenTimeTracker
 
             _cachedTotalTime = totalTime;
             _lastFullRefresh = DateTime.Now;
+            SetHeroTime(totalTime);
 
             if (TotalScreenTime != null)
                 TotalScreenTime.Text = TimeUtil.FormatTimeSpan(totalTime);
@@ -389,8 +399,7 @@ namespace ScreenTimeTracker
                             if (_disposed || _isWindowHidden) return;
                             _cachedTotalTime = totalTime;
                             _lastFullRefresh = DateTime.Now;
-                            if (ChartTimeValue != null)
-                                ChartTimeValue.Text = TimeUtil.FormatTimeSpan(totalTime);
+                            SetHeroTime(totalTime);
                         });
                     }
                     catch (Exception ex)
@@ -403,8 +412,7 @@ namespace ScreenTimeTracker
             else if (activeRecord != null && _trackingService.IsTracking)
             {
                 _cachedTotalTime = _cachedTotalTime.Add(TimeSpan.FromSeconds(1));
-                if (ChartTimeValue != null)
-                    ChartTimeValue.Text = TimeUtil.FormatTimeSpan(_cachedTotalTime);
+                SetHeroTime(_cachedTotalTime);
             }
         }
 
