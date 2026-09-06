@@ -1,5 +1,4 @@
 using System;
-using System.Threading.Tasks;
 #if !UNIT_TEST
 using Microsoft.UI.Xaml.Media.Imaging;
 #endif
@@ -112,7 +111,7 @@ namespace ScreenTimeTracker.Models
             else
             {
                 var focusedDuration = DateTime.Now - _lastFocusTime;
-                if (focusedDuration > TimeSpan.Zero && focusedDuration < TimeSpan.FromDays(1))
+                if (focusedDuration > TimeSpan.Zero)
                     _accumulatedDuration += focusedDuration;
             }
 
