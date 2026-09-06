@@ -26,6 +26,9 @@ namespace ScreenTimeTracker.Helpers
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr LoadImage(IntPtr hinst, string lpszName, int uType, int cxDesired, int cyDesired, uint fuLoad);
 
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr hWnd);
+
         private readonly Window _window;
         private readonly AppWindow _appWindow;
         private readonly OverlappedPresenter? _presenter;
@@ -68,7 +71,7 @@ namespace ScreenTimeTracker.Helpers
                 {
                     var display = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
                     var workArea = display.WorkArea;
-                    var scale = Math.Max(1.0, GetScaleAdjustment());
+                    var scale = GetScaleAdjustment();
 
                     int desiredWidth = (int)Math.Round(initialWidth * scale);
                     int desiredHeight = (int)Math.Round(initialHeight * scale);
@@ -87,7 +90,7 @@ namespace ScreenTimeTracker.Helpers
                 catch (Exception ex)
                 {
                     // Fall back to a taller fixed size. AppWindow.Resize consumes pixels.
-                    var scale = Math.Max(1.0, GetScaleAdjustment());
+                    var scale = GetScaleAdjustment();
                     _appWindow.Resize(new SizeInt32
                     {
                         Width = (int)Math.Round(initialWidth * scale),
@@ -158,7 +161,9 @@ namespace ScreenTimeTracker.Helpers
         {
             try
             {
-                return _window.Content?.XamlRoot?.RasterizationScale ?? 1.0;
+                if (_windowHandle == IntPtr.Zero) return 1.0;
+                uint dpi = GetDpiForWindow(_windowHandle);
+                return dpi > 0 ? Math.Max(1.0, dpi / 96.0) : 1.0;
             }
             catch
             {
