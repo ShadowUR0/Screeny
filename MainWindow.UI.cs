@@ -15,6 +15,7 @@ namespace ScreenTimeTracker
     {
         private static readonly string CurrentProcessName = Process.GetCurrentProcess().ProcessName;
         private bool _isLiveTotalRefreshInFlight;
+        private bool _isWindowHidden = App.StartedFromWindowsStartup;
 
         private void UpdateUsageChart(AppUsageRecord? liveFocusedRecord = null)
         {
@@ -103,8 +104,26 @@ namespace ScreenTimeTracker
 
         private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
         {
+            // Screen-time tracking continues in WindowTrackingService, but the expensive
+            // chart/list refresh loop has no work to do while the window lives in the tray.
+            _isWindowHidden = true;
+            _updateTimer?.Stop();
             args.Cancel = true;
             sender.Hide();
+        }
+
+        private void MainWindow_ActivatedForUiRefresh(object sender, WindowActivatedEventArgs args)
+        {
+            if (args.WindowActivationState == WindowActivationState.Deactivated)
+                return;
+
+            _isWindowHidden = false;
+            if (_trackingService.IsTracking)
+            {
+                _updateTimer.Start();
+                _isChartDirty = true;
+                DoLiveUpdates();
+            }
         }
 
         private void Window_Closed(object sender, Microsoft.UI.Xaml.WindowEventArgs args) => Dispose();
@@ -257,7 +276,6 @@ namespace ScreenTimeTracker
             TimeSpan maxDuration = TimeSpan.FromHours(24 * maxDays);
             if (totalTime > maxDuration) totalTime = maxDuration;
 
-            // Keep the one-second fast path aligned whenever a view is loaded or rebuilt.
             _cachedTotalTime = totalTime;
             _lastFullRefresh = DateTime.Now;
 
@@ -283,13 +301,17 @@ namespace ScreenTimeTracker
                 _viewModel.IsDateRangeSelected);
         }
 
-        private void SetUpUiElements() => UpdateDatePickerButtonText();
+        private void SetUpUiElements()
+        {
+            UpdateDatePickerButtonText();
+            this.Activated += MainWindow_ActivatedForUiRefresh;
+        }
 
         private void UpdateTimer_Tick(object? sender, object e)
         {
             try
             {
-                if (_disposed || _usageRecords == null || _isReloading) return;
+                if (_disposed || _isWindowHidden || _usageRecords == null || _isReloading) return;
 
                 _tickCount++;
                 if (_tickCount == int.MaxValue) _tickCount = 0;
@@ -348,7 +370,7 @@ namespace ScreenTimeTracker
 
                         DispatcherQueue?.TryEnqueue(() =>
                         {
-                            if (_disposed) return;
+                            if (_disposed || _isWindowHidden) return;
                             _cachedTotalTime = totalTime;
                             _lastFullRefresh = DateTime.Now;
                             _isLiveTotalRefreshInFlight = false;
@@ -376,7 +398,7 @@ namespace ScreenTimeTracker
             _isChartDirty = false;
             DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (_disposed) return;
+                if (_disposed || _isWindowHidden) return;
                 try
                 {
                     UpdateUsageChart();
@@ -408,11 +430,15 @@ namespace ScreenTimeTracker
         {
             if (_disposed) return;
 
+            // Do not mutate the visible collection while hidden. Finalized slices continue to
+            // persist; the next visible refresh can rebuild the view from authoritative data.
+            if (_isWindowHidden) return;
+
             DispatcherQueue?.TryEnqueue(() =>
             {
                 try
                 {
-                    if (!ViewIncludesToday()) return;
+                    if (_isWindowHidden || !ViewIncludesToday()) return;
                     if (record.ProcessName.Equals(CurrentProcessName, StringComparison.OrdinalIgnoreCase)) return;
                     if (ProcessFilter.ShouldIgnoreProcess(record.ProcessName)) return;
 
@@ -427,7 +453,7 @@ namespace ScreenTimeTracker
 
         private void TrackingService_WindowChanged(object? sender, EventArgs e)
         {
-            if (_disposed) return;
+            if (_disposed || _isWindowHidden) return;
             DispatcherQueue?.TryEnqueue(() => _isChartDirty = true);
         }
 
