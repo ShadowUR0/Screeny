@@ -173,6 +173,7 @@
                       ItemsSource="{Binding Records}"
                       SelectionMode="None"
                       IsItemClickEnabled="False"
+                      ContainerContentChanging="UsageListView_ContainerContentChanging"
                       HorizontalContentAlignment="Stretch">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">

@@ -344,7 +344,7 @@ namespace ScreenTimeTracker
                 if (_trackingService.IsTracking)
                     DoLiveUpdates();
 
-                if (_tickCount % 15 == 0 && _isChartDirty)
+                if (_tickCount % 3 == 0 && _isChartDirty)
                     DoChartRefresh();
 
                 if (_tickCount % 300 == 0)
@@ -431,6 +431,12 @@ namespace ScreenTimeTracker
                     Debug.WriteLine($"Error in chart refresh: {ex.Message}");
                 }
             });
+        }
+
+        private void UsageListView_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+        {
+            if (args.InRecycleQueue || args.Item is not AppUsageRecord record) return;
+            record.LoadAppIconIfNeeded();
         }
 
         private void DoIconRetry()
@@ -535,10 +541,7 @@ namespace ScreenTimeTracker
 
                 _usageRecords.Clear();
                 foreach (var record in live.OrderByDescending(record => record.Duration))
-                {
-                    record.LoadAppIconIfNeeded();
                     _usageRecords.Add(record);
-                }
 
                 _isChartDirty = true;
                 UpdateSummaryTab(_usageRecords.ToList());

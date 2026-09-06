@@ -9,6 +9,8 @@ namespace ScreenTimeTracker.Models
         TimeSpan Duration,
         DateTime Date)
     {
+        public string ExecutablePath { get; init; } = string.Empty;
+
         public static bool TryCreate(
             string processName,
             string applicationName,

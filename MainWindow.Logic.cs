@@ -269,7 +269,6 @@ namespace ScreenTimeTracker
 
                 foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    record.LoadAppIconIfNeeded();
                     _usageRecords.Add(record);
                 }
 
@@ -311,7 +310,6 @@ namespace ScreenTimeTracker
                 var records = BuildRecords(() => _databaseService!.GetRawRecordsForDateRange(startDate, endDate));
                 foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    record.LoadAppIconIfNeeded();
                     _usageRecords.Add(record);
                 }
 
@@ -382,7 +380,6 @@ namespace ScreenTimeTracker
 
                 foreach (var record in records.OrderByDescending(record => record.Duration))
                 {
-                    record.LoadAppIconIfNeeded();
                     _usageRecords.Add(record);
                 }
 

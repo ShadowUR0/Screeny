@@ -90,7 +90,10 @@ namespace ScreenTimeTracker.Services
 
                 string? exePath = ResolveExecutablePath(record);
                 if (!string.IsNullOrWhiteSpace(exePath))
+                {
+                    record.ExecutablePath = exePath;
                     resolved = await TryLoadIconWithSHGetFileInfoAsync(exePath);
+                }
 
                 if (resolved == null && record.WindowHandle != IntPtr.Zero)
                     resolved = await TryLoadIconFromWindowHandleAsync(record.WindowHandle);
@@ -163,47 +166,56 @@ namespace ScreenTimeTracker.Services
 
         private static string? ResolveExecutablePath(AppUsageRecord record)
         {
-            if (record.ProcessId <= 0)
-                return null;
+            if (!string.IsNullOrWhiteSpace(record.ExecutablePath) && File.Exists(record.ExecutablePath))
+                return record.ExecutablePath;
+
+            string? byId = ResolveExecutablePathByProcessId(record.ProcessId);
+            if (!string.IsNullOrWhiteSpace(byId)) return byId;
+
+            string processName = Path.GetFileNameWithoutExtension(record.ProcessName ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(processName)) return null;
 
             try
             {
-                using var process = System.Diagnostics.Process.GetProcessById(record.ProcessId);
-                string? path = process.MainModule?.FileName;
-                if (!string.IsNullOrWhiteSpace(path))
-                    return path;
+                foreach (var process in System.Diagnostics.Process.GetProcessesByName(processName))
+                {
+                    using (process)
+                    {
+                        string? path = ResolveExecutablePathByProcessId(process.Id);
+                        if (!string.IsNullOrWhiteSpace(path)) return path;
+                    }
+                }
             }
-            catch
+            catch { }
+            return null;
+        }
+
+        private static string? ResolveExecutablePathByProcessId(int processId)
+        {
+            if (processId <= 0) return null;
+            try
             {
+                using var process = System.Diagnostics.Process.GetProcessById(processId);
+                string? path = process.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
             }
+            catch { }
 
             try
             {
                 IntPtr processHandle = Win32Interop.OpenProcess(
-                    Win32Interop.PROCESS_QUERY_LIMITED_INFORMATION,
-                    false,
-                    record.ProcessId);
-
-                if (processHandle == IntPtr.Zero)
-                    return null;
-
+                    Win32Interop.PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+                if (processHandle == IntPtr.Zero) return null;
                 try
                 {
                     var path = new StringBuilder(1024);
                     int size = path.Capacity;
                     return Win32Interop.QueryFullProcessImageName(processHandle, 0, path, ref size)
-                        ? path.ToString()
-                        : null;
+                        && File.Exists(path.ToString()) ? path.ToString() : null;
                 }
-                finally
-                {
-                    Win32Interop.CloseHandle(processHandle);
-                }
+                finally { Win32Interop.CloseHandle(processHandle); }
             }
-            catch
-            {
-                return null;
-            }
+            catch { return null; }
         }
 
         private static async Task<BitmapImage?> TryLoadIconWithSHGetFileInfoAsync(string path)

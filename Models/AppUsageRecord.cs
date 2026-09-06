@@ -15,6 +15,7 @@ namespace ScreenTimeTracker.Models
         public IntPtr WindowHandle { get; set; }
         public bool IsFocused { get; set; }
         public string ApplicationName { get; set; } = string.Empty;
+        public string ExecutablePath { get; set; } = string.Empty;
         public DateTime Date { get; set; }
         public DateTime? LastUpdated { get; set; }
 
@@ -137,6 +138,7 @@ namespace ScreenTimeTracker.Models
                 WindowHandle = WindowHandle,
                 IsFocused = IsFocused,
                 ApplicationName = ApplicationName,
+                ExecutablePath = ExecutablePath,
                 Date = Date,
                 LastUpdated = LastUpdated,
                 StartTime = StartTime,

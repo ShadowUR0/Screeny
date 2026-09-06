@@ -11,7 +11,7 @@ namespace ScreenTimeTracker.Services
 {
     public class DatabaseService : IDisposable
     {
-        private const int LatestSchemaVersion = 2;
+        private const int LatestSchemaVersion = 3;
         private const int BusyTimeoutMilliseconds = 5000;
         private const string JournalMode = "WAL";
         private const string FinalizedSliceIndexName = "idx_app_usage_finalized_slice_unique";
@@ -235,6 +235,7 @@ namespace ScreenTimeTracker.Services
                         date TEXT NOT NULL,
                         process_name TEXT NOT NULL,
                         app_name TEXT,
+                        executable_path TEXT,
                         start_time TEXT NOT NULL,
                         end_time TEXT,
                         duration INTEGER,
@@ -310,6 +311,12 @@ namespace ScreenTimeTracker.Services
                 if (currentVersion < 2)
                 {
                     MigrateToV2();
+                    currentVersion = GetDatabaseVersion();
+                }
+
+                if (currentVersion < 3)
+                {
+                    MigrateToV3();
                 }
             }
             catch (Exception ex)
@@ -413,7 +420,8 @@ namespace ScreenTimeTracker.Services
         {
             return ColumnExists("app_usage", "date")
                 && ColumnExists("app_usage", "is_focused")
-                && ColumnExists("app_usage", "last_updated");
+                && ColumnExists("app_usage", "last_updated")
+                && ColumnExists("app_usage", "executable_path");
         }
 
         private void MigrateToV1()
@@ -525,6 +533,27 @@ namespace ScreenTimeTracker.Services
             }
         }
 
+        private void MigrateToV3()
+        {
+            Debug.WriteLine("Performing migration to version 3");
+            try
+            {
+                if (!ColumnExists("app_usage", "executable_path"))
+                {
+                    using var command = _connection.CreateCommand();
+                    command.CommandText = "ALTER TABLE app_usage ADD COLUMN executable_path TEXT;";
+                    command.ExecuteNonQuery();
+                }
+
+                SetDatabaseVersion(3);
+                Debug.WriteLine("Database user_version set to 3.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error during migration to V3: {ex.Message}");
+            }
+        }
+
         private DateTime ValidateDate(DateTime date)
         {
             if (date > DateTime.Now)
@@ -571,14 +600,15 @@ namespace ScreenTimeTracker.Services
                 OpenConnection(connection);
                 using var transaction = connection.BeginTransaction();
 
-                string insertSql = @"INSERT INTO app_usage (date, process_name, app_name, start_time, end_time, duration, is_focused, last_updated)
-                                   VALUES (@Date, @ProcessName, @ApplicationName, @StartTime, @EndTime, @Duration, @IsFocused, @LastUpdated);
+                string insertSql = @"INSERT INTO app_usage (date, process_name, app_name, executable_path, start_time, end_time, duration, is_focused, last_updated)
+                                   VALUES (@Date, @ProcessName, @ApplicationName, @ExecutablePath, @StartTime, @EndTime, @Duration, @IsFocused, @LastUpdated);
                                    SELECT last_insert_rowid();";
 
                 using var command = new SqliteCommand(insertSql, connection, transaction);
                 command.Parameters.AddWithValue("@Date", dateString);
                 command.Parameters.AddWithValue("@ProcessName", record.ProcessName);
                 command.Parameters.AddWithValue("@ApplicationName", record.ApplicationName ?? "");
+                command.Parameters.AddWithValue("@ExecutablePath", string.IsNullOrWhiteSpace(record.ExecutablePath) ? (object)DBNull.Value : record.ExecutablePath);
                 command.Parameters.AddWithValue("@StartTime", validatedStartTime.ToString("o"));
                 command.Parameters.AddWithValue("@EndTime", validatedEndTime?.ToString("o") ?? (object)DBNull.Value);
                 command.Parameters.AddWithValue("@Duration", durationMs);
@@ -626,13 +656,14 @@ namespace ScreenTimeTracker.Services
                 // INSERT OR IGNORE collapses the old SELECT-then-INSERT pair into one indexed
                 // write and removes a race between the duplicate probe and insertion.
                 const string insertSql = @"INSERT OR IGNORE INTO app_usage
-                                   (date, process_name, app_name, start_time, end_time, duration, is_focused, last_updated)
-                                   VALUES (@Date, @ProcessName, @ApplicationName, @StartTime, @EndTime, @Duration, @IsFocused, @LastUpdated);";
+                                   (date, process_name, app_name, executable_path, start_time, end_time, duration, is_focused, last_updated)
+                                   VALUES (@Date, @ProcessName, @ApplicationName, @ExecutablePath, @StartTime, @EndTime, @Duration, @IsFocused, @LastUpdated);";
 
                 using var command = new SqliteCommand(insertSql, connection, transaction);
                 command.Parameters.AddWithValue("@Date", slice.Date.ToString("yyyy-MM-dd"));
                 command.Parameters.AddWithValue("@ProcessName", slice.ProcessName);
                 command.Parameters.AddWithValue("@ApplicationName", slice.ApplicationName);
+                command.Parameters.AddWithValue("@ExecutablePath", string.IsNullOrWhiteSpace(slice.ExecutablePath) ? (object)DBNull.Value : slice.ExecutablePath);
                 command.Parameters.AddWithValue("@StartTime", slice.StartTime.ToString("o"));
                 command.Parameters.AddWithValue("@EndTime", slice.EndTime.ToString("o"));
                 command.Parameters.AddWithValue("@Duration", Math.Max(0L, (long)slice.Duration.TotalMilliseconds));
@@ -676,7 +707,7 @@ namespace ScreenTimeTracker.Services
                 using var transaction = connection.BeginTransaction();
 
                 string updateSql = @"UPDATE app_usage SET date = @Date, process_name = @ProcessName, app_name = @ApplicationName,
-                                   end_time = @EndTime, duration = @Duration, is_focused = @IsFocused, last_updated = @LastUpdated
+                                   executable_path = @ExecutablePath, end_time = @EndTime, duration = @Duration, is_focused = @IsFocused, last_updated = @LastUpdated
                                    WHERE id = @Id;";
 
                 using var command = new SqliteCommand(updateSql, connection, transaction);
@@ -684,6 +715,7 @@ namespace ScreenTimeTracker.Services
                 command.Parameters.AddWithValue("@Date", dateString);
                 command.Parameters.AddWithValue("@ProcessName", record.ProcessName);
                 command.Parameters.AddWithValue("@ApplicationName", record.ApplicationName ?? "");
+                command.Parameters.AddWithValue("@ExecutablePath", string.IsNullOrWhiteSpace(record.ExecutablePath) ? (object)DBNull.Value : record.ExecutablePath);
                 command.Parameters.AddWithValue("@EndTime", validatedEndTime?.ToString("o") ?? (object)DBNull.Value);
                 command.Parameters.AddWithValue("@Duration", durationMs);
                 command.Parameters.AddWithValue("@IsFocused", record.IsFocused ? 1 : 0);
@@ -724,7 +756,7 @@ namespace ScreenTimeTracker.Services
 
                 using var command = connection.CreateCommand();
                 command.CommandText = @"
-                    SELECT id, process_name, app_name, start_time, end_time, duration, is_focused, last_updated
+                    SELECT id, process_name, app_name, executable_path, start_time, end_time, duration, is_focused, last_updated
                     FROM app_usage
                     WHERE date = $date
                     ORDER BY process_name, start_time;";
@@ -742,10 +774,13 @@ namespace ScreenTimeTracker.Services
                         long durationMs = !reader.IsDBNull(reader.GetOrdinal("duration")) ? reader.GetInt64(reader.GetOrdinal("duration")) : 0;
                         bool isFocused = !reader.IsDBNull(reader.GetOrdinal("is_focused")) && reader.GetInt32(reader.GetOrdinal("is_focused")) == 1;
                         DateTime? lastUpdated = !reader.IsDBNull(reader.GetOrdinal("last_updated")) ? DateTime.Parse(reader.GetString(reader.GetOrdinal("last_updated"))) : null;
+                        string executablePath = !reader.IsDBNull(reader.GetOrdinal("executable_path")) ? reader.GetString(reader.GetOrdinal("executable_path")) : string.Empty;
 
                         if (processGroups.TryGetValue(processName, out var existingRecord))
                         {
                             existingRecord._accumulatedDuration += TimeSpan.FromMilliseconds(durationMs);
+                            if (string.IsNullOrWhiteSpace(existingRecord.ExecutablePath) && !string.IsNullOrWhiteSpace(executablePath))
+                                existingRecord.ExecutablePath = executablePath;
                             if (lastUpdated.HasValue && (!existingRecord.LastUpdated.HasValue || lastUpdated.Value > existingRecord.LastUpdated.Value))
                             {
                                 existingRecord.LastUpdated = lastUpdated;
@@ -765,6 +800,7 @@ namespace ScreenTimeTracker.Services
                                 Id = reader.GetInt32(reader.GetOrdinal("id")),
                                 ProcessName = processName,
                                 ApplicationName = !reader.IsDBNull(reader.GetOrdinal("app_name")) ? reader.GetString(reader.GetOrdinal("app_name")) : processName,
+                                ExecutablePath = executablePath,
                                 Date = date,
                                 StartTime = dbStartTime,
                                 IsFocused = isFocused,
@@ -968,7 +1004,7 @@ namespace ScreenTimeTracker.Services
                 string endDateStr = endDate.ToString("yyyy-MM-dd");
 
                 const string sql = @"
-                    SELECT id, process_name, app_name, start_time, end_time, duration, is_focused, last_updated, date
+                    SELECT id, process_name, app_name, executable_path, start_time, end_time, duration, is_focused, last_updated, date
                     FROM app_usage
                     WHERE date >= @StartDate AND date <= @EndDate
                     ORDER BY date ASC, start_time ASC, process_name ASC;";
@@ -992,6 +1028,7 @@ namespace ScreenTimeTracker.Services
                             Id = reader.GetInt32(reader.GetOrdinal("id")),
                             ProcessName = reader.GetString(reader.GetOrdinal("process_name")),
                             ApplicationName = !reader.IsDBNull(reader.GetOrdinal("app_name")) ? reader.GetString(reader.GetOrdinal("app_name")) : reader.GetString(reader.GetOrdinal("process_name")),
+                            ExecutablePath = !reader.IsDBNull(reader.GetOrdinal("executable_path")) ? reader.GetString(reader.GetOrdinal("executable_path")) : string.Empty,
                             StartTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("start_time"))),
                             EndTime = !reader.IsDBNull(reader.GetOrdinal("end_time")) ? DateTime.Parse(reader.GetString(reader.GetOrdinal("end_time"))) : (DateTime?)null,
                             _accumulatedDuration = TimeSpan.FromMilliseconds(!reader.IsDBNull(reader.GetOrdinal("duration")) ? reader.GetInt64(reader.GetOrdinal("duration")) : 0),
@@ -1106,7 +1143,9 @@ namespace ScreenTimeTracker.Services
                     if (aggregated.TryGetValue(processName, out var existing))
                     {
                         existing._accumulatedDuration += liveRecord.Duration;
+                        existing.ProcessId = liveRecord.ProcessId;
                         existing.WindowHandle = liveRecord.WindowHandle;
+                        if (!string.IsNullOrWhiteSpace(liveRecord.ExecutablePath)) existing.ExecutablePath = liveRecord.ExecutablePath;
                         if (!string.IsNullOrEmpty(liveRecord.WindowTitle)) existing.WindowTitle = liveRecord.WindowTitle;
                     }
                     else
@@ -1129,14 +1168,22 @@ namespace ScreenTimeTracker.Services
 
             foreach (var liveRec in liveRecords)
             {
-                var temp = new AppUsageRecord { ProcessName = liveRec.ProcessName, WindowTitle = liveRec.WindowTitle };
+                var temp = new AppUsageRecord
+                {
+                    ProcessName = liveRec.ProcessName,
+                    ProcessId = liveRec.ProcessId,
+                    WindowTitle = liveRec.WindowTitle,
+                    ExecutablePath = liveRec.ExecutablePath
+                };
                 ApplicationProcessingHelper.ProcessApplicationRecord(temp);
                 var processName = temp.ProcessName;
 
                 if (aggregated.TryGetValue(processName, out var existing))
                 {
                     existing._accumulatedDuration += liveRec.Duration;
+                    existing.ProcessId = liveRec.ProcessId;
                     existing.WindowHandle = liveRec.WindowHandle;
+                    if (!string.IsNullOrWhiteSpace(liveRec.ExecutablePath)) existing.ExecutablePath = liveRec.ExecutablePath;
                     if (!string.IsNullOrEmpty(liveRec.WindowTitle)) existing.WindowTitle = liveRec.WindowTitle;
                     if (liveRec.StartTime < existing.StartTime) existing.StartTime = liveRec.StartTime;
                 }
@@ -1150,8 +1197,10 @@ namespace ScreenTimeTracker.Services
                         Date = liveRec.Date,
                         StartTime = liveRec.StartTime,
                         EndTime = liveRec.EndTime,
+                        ProcessId = liveRec.ProcessId,
                         WindowHandle = liveRec.WindowHandle,
-                        WindowTitle = liveRec.WindowTitle
+                        WindowTitle = liveRec.WindowTitle,
+                        ExecutablePath = liveRec.ExecutablePath
                     };
                     aggregated[processName] = newRecord;
                 }
@@ -1166,7 +1215,13 @@ namespace ScreenTimeTracker.Services
             {
                 if (rec.Duration.TotalSeconds < 5) continue;
 
-                var temp = new AppUsageRecord { ProcessName = rec.ProcessName, WindowTitle = rec.WindowTitle };
+                var temp = new AppUsageRecord
+                {
+                    ProcessName = rec.ProcessName,
+                    ProcessId = rec.ProcessId,
+                    WindowTitle = rec.WindowTitle,
+                    ExecutablePath = rec.ExecutablePath
+                };
                 ApplicationProcessingHelper.ProcessApplicationRecord(temp);
                 var processName = temp.ProcessName;
 
@@ -1177,6 +1232,8 @@ namespace ScreenTimeTracker.Services
                 if (aggregated.TryGetValue(processName, out var existing))
                 {
                     existing._accumulatedDuration += rec.Duration;
+                    if (existing.ProcessId <= 0 && rec.ProcessId > 0) existing.ProcessId = rec.ProcessId;
+                    if (string.IsNullOrWhiteSpace(existing.ExecutablePath) && !string.IsNullOrWhiteSpace(rec.ExecutablePath)) existing.ExecutablePath = rec.ExecutablePath;
                     if (rec.StartTime < existing.StartTime) existing.StartTime = rec.StartTime;
                     if (rec.EndTime.HasValue)
                     {
@@ -1193,7 +1250,9 @@ namespace ScreenTimeTracker.Services
                         Date = rec.Date != default ? rec.Date : (fallbackDate ?? DateTime.Today),
                         StartTime = rec.StartTime,
                         EndTime = rec.EndTime,
-                        WindowTitle = rec.WindowTitle
+                        ProcessId = rec.ProcessId,
+                        WindowTitle = rec.WindowTitle,
+                        ExecutablePath = rec.ExecutablePath
                     };
                     aggregated[processName] = newRecord;
                 }

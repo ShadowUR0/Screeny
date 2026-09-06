@@ -8,6 +8,9 @@ namespace ScreenTimeTracker.Helpers
         {
             ArgumentNullException.ThrowIfNull(record);
 
+            if (!string.IsNullOrWhiteSpace(record.ExecutablePath))
+                return record.ExecutablePath.Trim().ToLowerInvariant();
+
             var stableProcessName = ApplicationNameNormalizer.NormalizeProcessName(record.ProcessName);
             return stableProcessName.Trim().ToLowerInvariant();
         }

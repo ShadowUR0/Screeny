@@ -346,7 +346,7 @@ namespace ScreenTimeTracker.Services
                     out var slice) &&
                 slice != null)
             {
-                UsageSliceFinalized?.Invoke(this, slice);
+                UsageSliceFinalized?.Invoke(this, slice with { ExecutablePath = record.ExecutablePath });
             }
         }
 
@@ -573,6 +573,17 @@ namespace ScreenTimeTracker.Services
         {
             lock (_lockObject)
             {
+                if (ProcessFilter.ShouldIgnoreProcess(processName))
+                {
+                    if (_currentRecord != null)
+                    {
+                        FinalizeRecord(_currentRecord, DateTime.Now);
+                        UsageRecordUpdated?.Invoke(this, _currentRecord);
+                        _currentRecord = null;
+                    }
+                    return;
+                }
+
                 if (_currentRecord != null &&
                     _currentRecord.WindowHandle == foregroundWindow &&
                     _currentRecord.ProcessId == processId &&

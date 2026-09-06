@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -34,9 +34,9 @@
     <GenerateTemporaryStoreCertificate>True</GenerateTemporaryStoreCertificate>
     <AppxPackageDir>bin\AppPackages\</AppxPackageDir>
     <PackageCertificateThumbprint>5FDF281B3C45773D5346E7BF85EDC1F51FFB83D0</PackageCertificateThumbprint>
-    <Version>1.8.1.0</Version>
-    <AssemblyVersion>1.8.1.0</AssemblyVersion>
-    <FileVersion>1.8.1.0</FileVersion>
+    <Version>1.8.2.0</Version>
+    <AssemblyVersion>1.8.2.0</AssemblyVersion>
+    <FileVersion>1.8.2.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

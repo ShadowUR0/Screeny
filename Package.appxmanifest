@@ -9,17 +9,17 @@
 	  	<Identity
   	  Name="ArnoGevorkyan.ScreenyScreenTime"
   	  Publisher="CN=68946438-19C3-48BF-A76C-3CED272FBD27"
- 	  Version="1.8.1.0" />
+    Version="1.8.2.0" />
 
 	<Properties>
-		<DisplayName>Screeny – Screen Time</DisplayName>
+		<DisplayName>Screeny â€“ Screen Time</DisplayName>
 		<PublisherDisplayName>Arno Gevorkyan</PublisherDisplayName>
 		<Logo>Assets\StoreLogo.png</Logo>
 	</Properties>
 
 	<Dependencies>
 		<TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.22631.0" />
-		<!-- Windows App SDK runtime is shipped self‑contained inside the package, so no external framework dependency is declared. -->
+		<!-- Windows App SDK runtime is shipped selfâ€‘contained inside the package, so no external framework dependency is declared. -->
 	</Dependencies>
 
 	<Resources>
@@ -31,7 +31,7 @@
 		  Executable="Screeny.exe"
 		  EntryPoint="Windows.FullTrustApplication">
 			<uap:VisualElements
-			  DisplayName="Screeny – Screen Time"
+			  DisplayName="Screeny â€“ Screen Time"
 			  Description="Tracks screen time per application."
 			  BackgroundColor="transparent"
 			  Square150x150Logo="Assets\Square150x150Logo.png"
