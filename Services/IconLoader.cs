@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +18,19 @@ namespace ScreenTimeTracker.Services
 
     public sealed class IconLoader : IIconLoader
     {
+        private const uint SmtoAbortIfHung = 0x0002;
+        private const uint WindowMessageTimeoutMilliseconds = 100;
         private static readonly TimeSpan FailureCacheDuration = TimeSpan.FromMinutes(5);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SendMessageTimeout(
+            IntPtr hWnd,
+            uint msg,
+            IntPtr wParam,
+            IntPtr lParam,
+            uint flags,
+            uint timeout,
+            out IntPtr result);
 
         public static IconLoader Instance { get; } = new IconLoader();
 
@@ -37,21 +50,15 @@ namespace ScreenTimeTracker.Services
 
             string cacheKey = AppIconIdentity.CreateProcessCacheKey(record);
             if (string.IsNullOrWhiteSpace(cacheKey))
-            {
                 return null;
-            }
 
             if (_iconCache.TryGetValue(cacheKey, out var cached))
-            {
                 return cached;
-            }
 
             if (_failedUntilUtc.TryGetValue(cacheKey, out var failedUntil))
             {
                 if (failedUntil > DateTime.UtcNow)
-                {
                     return null;
-                }
 
                 _failedUntilUtc.TryRemove(cacheKey, out _);
             }
@@ -63,13 +70,14 @@ namespace ScreenTimeTracker.Services
         private Task<BitmapImage?> StartSharedLoad(string cacheKey, AppUsageRecord record)
         {
             var task = ResolveAndCacheAsync(cacheKey, record);
-
             _ = task.ContinueWith(
-                completedTask => _inflightLoads.TryRemove(cacheKey, out _),
+                completedTask =>
+                {
+                    _inflightLoads.TryRemove(cacheKey, out _);
+                },
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
-
             return task;
         }
 
@@ -82,14 +90,10 @@ namespace ScreenTimeTracker.Services
 
                 string? exePath = ResolveExecutablePath(record);
                 if (!string.IsNullOrWhiteSpace(exePath))
-                {
                     resolved = await TryLoadIconWithSHGetFileInfoAsync(exePath);
-                }
 
                 if (resolved == null && record.WindowHandle != IntPtr.Zero)
-                {
                     resolved = await TryLoadIconFromWindowHandleAsync(record.WindowHandle);
-                }
 
                 if (resolved != null)
                 {
@@ -115,22 +119,37 @@ namespace ScreenTimeTracker.Services
             }
         }
 
+        private static IntPtr TryGetWindowIcon(IntPtr windowHandle, int iconSize)
+        {
+            if (SendMessageTimeout(
+                    windowHandle,
+                    (uint)Win32Interop.WM_GETICON,
+                    (IntPtr)iconSize,
+                    IntPtr.Zero,
+                    SmtoAbortIfHung,
+                    WindowMessageTimeoutMilliseconds,
+                    out var iconHandle) == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            return iconHandle;
+        }
+
         private static async Task<BitmapImage?> TryLoadIconFromWindowHandleAsync(IntPtr windowHandle)
         {
             try
             {
-                IntPtr iconHandle = Win32Interop.SendMessage(windowHandle, Win32Interop.WM_GETICON, (IntPtr)Win32Interop.ICON_BIG, IntPtr.Zero);
+                IntPtr iconHandle = TryGetWindowIcon(windowHandle, Win32Interop.ICON_BIG);
                 if (iconHandle == IntPtr.Zero)
-                    iconHandle = Win32Interop.SendMessage(windowHandle, Win32Interop.WM_GETICON, (IntPtr)Win32Interop.ICON_SMALL, IntPtr.Zero);
+                    iconHandle = TryGetWindowIcon(windowHandle, Win32Interop.ICON_SMALL);
                 if (iconHandle == IntPtr.Zero)
                     iconHandle = Win32Interop.GetClassLongPtrSafe(windowHandle, Win32Interop.GCL_HICON);
                 if (iconHandle == IntPtr.Zero)
                     iconHandle = Win32Interop.GetClassLongPtrSafe(windowHandle, Win32Interop.GCL_HICONSM);
 
                 if (iconHandle == IntPtr.Zero)
-                {
                     return null;
-                }
 
                 using var icon = (System.Drawing.Icon)System.Drawing.Icon.FromHandle(iconHandle).Clone();
                 using var bitmap = icon.ToBitmap();
@@ -145,18 +164,14 @@ namespace ScreenTimeTracker.Services
         private static string? ResolveExecutablePath(AppUsageRecord record)
         {
             if (record.ProcessId <= 0)
-            {
                 return null;
-            }
 
             try
             {
                 using var process = System.Diagnostics.Process.GetProcessById(record.ProcessId);
                 string? path = process.MainModule?.FileName;
                 if (!string.IsNullOrWhiteSpace(path))
-                {
                     return path;
-                }
             }
             catch
             {
@@ -170,9 +185,7 @@ namespace ScreenTimeTracker.Services
                     record.ProcessId);
 
                 if (processHandle == IntPtr.Zero)
-                {
                     return null;
-                }
 
                 try
                 {
@@ -196,9 +209,7 @@ namespace ScreenTimeTracker.Services
         private static async Task<BitmapImage?> TryLoadIconWithSHGetFileInfoAsync(string path)
         {
             if (!File.Exists(path))
-            {
                 return null;
-            }
 
             var info = new Win32Interop.SHFILEINFO();
             uint flags = Win32Interop.SHGFI_ICON | Win32Interop.SHGFI_LARGEICON;
@@ -207,7 +218,7 @@ namespace ScreenTimeTracker.Services
                     path,
                     0,
                     ref info,
-                    (uint)System.Runtime.InteropServices.Marshal.SizeOf(info),
+                    (uint)Marshal.SizeOf(info),
                     flags) == IntPtr.Zero || info.hIcon == IntPtr.Zero)
             {
                 return null;
