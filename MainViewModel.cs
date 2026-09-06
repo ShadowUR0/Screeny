@@ -7,28 +7,20 @@ using ScreenTimeTracker.Models;
 
 namespace ScreenTimeTracker
 {
-    /// <summary>
-    /// Minimal ViewModel that will progressively absorb state from <see cref="MainWindow"/>.
-    /// For now it only exposes the records collection and the selected date plus two placeholder
-    /// commands that will get wired up later. Keeping it small ensures the project compiles at
-    /// every incremental refactor step.
-    /// </summary>
     public sealed class MainViewModel : INotifyPropertyChanged
     {
-        // Domain collection to which the UI ListView/Chart will bind
         public ObservableCollection<AppUsageRecord> Records { get; } = new();
-
-        // Aggregated (merged) records used for summary/chart views
         public ObservableCollection<AppUsageRecord> AggregatedRecords { get; } = new();
 
         private DateTime _selectedDate = DateTime.Today;
         public DateTime SelectedDate
         {
             get => _selectedDate;
-            set 
-            { 
-                SetProperty(ref _selectedDate, value);
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FormattedSelectedDate)));
+            set
+            {
+                if (!SetProperty(ref _selectedDate, value)) return;
+                OnPropertyChanged(nameof(FormattedSelectedDate));
+                OnPropertyChanged(nameof(FriendlySelectedDate));
             }
         }
 
@@ -57,10 +49,10 @@ namespace ScreenTimeTracker
         public ChartViewMode CurrentChartViewMode
         {
             get => _currentChartViewMode;
-            set 
-            { 
-                SetProperty(ref _currentChartViewMode, value);
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ChartViewModeLabel)));
+            set
+            {
+                if (!SetProperty(ref _currentChartViewMode, value)) return;
+                OnPropertyChanged(nameof(ChartViewModeLabel));
             }
         }
 
@@ -68,11 +60,10 @@ namespace ScreenTimeTracker
         public bool IsTracking
         {
             get => _isTracking;
-            set 
-            { 
-                SetProperty(ref _isTracking, value);
-                // Notify dependent properties
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrackingStatusText)));
+            set
+            {
+                if (!SetProperty(ref _isTracking, value)) return;
+                OnPropertyChanged(nameof(TrackingStatusText));
             }
         }
 
@@ -82,20 +73,25 @@ namespace ScreenTimeTracker
             get => _persistenceHealth;
             set
             {
-                SetProperty(ref _persistenceHealth, value);
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrackingStatusText)));
+                if (!SetProperty(ref _persistenceHealth, value)) return;
+                OnPropertyChanged(nameof(TrackingStatusText));
             }
         }
 
-        // Properties to replace converters
         public string TrackingStatusText => PersistenceHealth switch
         {
             PersistenceHealthStatus.FatalIssue => "Data issue",
             PersistenceHealthStatus.RetryableIssue => "Saving delayed",
             _ => IsTracking ? "Active" : "Paused"
         };
+
         public string ChartViewModeLabel => CurrentChartViewMode == ChartViewMode.Hourly ? "Hourly View" : "Daily View";
         public string FormattedSelectedDate => SelectedDate.ToString("MMM dd, yyyy");
+        public string FriendlySelectedDate => SelectedDate.Date == DateTime.Today
+            ? "Today"
+            : SelectedDate.Date == DateTime.Today.AddDays(-1)
+                ? "Yesterday"
+                : SelectedDate.ToString("ddd, MMM d");
 
         public ICommand StartTrackingCommand { get; }
         public ICommand StopTrackingCommand { get; }
@@ -106,44 +102,43 @@ namespace ScreenTimeTracker
         public MainViewModel()
         {
             StartTrackingCommand = new RelayCommand(_ => OnStartTrackingRequested?.Invoke(this, EventArgs.Empty));
-            StopTrackingCommand  = new RelayCommand(_ => OnStopTrackingRequested?.Invoke(this, EventArgs.Empty));
-
+            StopTrackingCommand = new RelayCommand(_ => OnStopTrackingRequested?.Invoke(this, EventArgs.Empty));
             ToggleTrackingCommand = new RelayCommand(_ => OnToggleTrackingRequested?.Invoke(this, EventArgs.Empty));
-            PickDateCommand      = new RelayCommand(_ => OnPickDateRequested?.Invoke(this, EventArgs.Empty));
+            PickDateCommand = new RelayCommand(_ => OnPickDateRequested?.Invoke(this, EventArgs.Empty));
             ToggleViewModeCommand = new RelayCommand(_ => OnToggleViewModeRequested?.Invoke(this, EventArgs.Empty));
         }
 
-        // Events raised when commands fire – MainWindow will subscribe for now
         public event EventHandler? OnStartTrackingRequested;
         public event EventHandler? OnStopTrackingRequested;
         public event EventHandler? OnToggleTrackingRequested;
         public event EventHandler? OnPickDateRequested;
         public event EventHandler? OnToggleViewModeRequested;
-
-        #region INotifyPropertyChanged
         public event PropertyChangedEventHandler? PropertyChanged;
-        private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-        {
-            if (!Equals(field, value))
-            {
-                field = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-            }
-        }
-        #endregion
 
-        /// <summary>
-        /// Very small ICommand implementation to keep dependencies minimal during refactor.
-        /// </summary>
+        private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+
+        private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+        {
+            if (Equals(field, value)) return false;
+            field = value;
+            OnPropertyChanged(propertyName);
+            return true;
+        }
+
         private sealed class RelayCommand : ICommand
         {
             private readonly Action<object?> _execute;
             private readonly Func<object?, bool>? _canExecute;
+
             public RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null)
             {
                 _execute = execute;
                 _canExecute = canExecute;
             }
+
             public bool CanExecute(object? parameter) => _canExecute?.Invoke(parameter) ?? true;
             public void Execute(object? parameter) => _execute(parameter);
             public event EventHandler? CanExecuteChanged;
