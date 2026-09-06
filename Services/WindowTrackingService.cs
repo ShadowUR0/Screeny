@@ -89,9 +89,9 @@ namespace ScreenTimeTracker.Services
 
         public WindowTrackingService()
         {
-            // Foreground changes are event-driven. One tick per second is enough for
-            // live duration display and idle detection, and halves periodic wake-ups.
-            _timer = new System.Timers.Timer(1000);
+            // Foreground changes are event-driven. A two-second maintenance tick is
+            // sufficient for idle detection/day rollover and keeps background wakeups low.
+            _timer = new System.Timers.Timer(2000);
             _timer.Elapsed += Timer_Elapsed;
             _timer.AutoReset = true;
 
@@ -176,8 +176,6 @@ namespace ScreenTimeTracker.Services
                 return 0;
             }
 
-            // LASTINPUTINFO uses the same wrapping 32-bit tick counter as
-            // Environment.TickCount. Unsigned subtraction handles rollover safely.
             uint elapsedMilliseconds = unchecked((uint)Environment.TickCount - li.dwTime);
             return (int)(elapsedMilliseconds / 1000U);
         }
@@ -207,7 +205,6 @@ namespace ScreenTimeTracker.Services
             }
             catch
             {
-                // Re-acquire on a later check if the media-session service was reset.
                 _mediaSessionManager = null;
             }
 
@@ -223,9 +220,6 @@ namespace ScreenTimeTracker.Services
                 DateTime now = DateTime.Now;
                 int idleSeconds = GetIdleSeconds();
 
-                // The media-session API is relatively expensive. There is no reason to
-                // touch it while the user is active, so query it only after the idle
-                // threshold is actually reached and then cache the result briefly.
                 bool mediaPlaying = idleSeconds > IdleThresholdSeconds && IsAnyMediaPlaying(DateTime.UtcNow);
                 bool currentlyIdle = idleSeconds > IdleThresholdSeconds && !mediaPlaying;
                 bool shouldRefreshActiveWindow;
@@ -380,7 +374,9 @@ namespace ScreenTimeTracker.Services
                 return;
             }
 
-            _currentRecord.RaiseDurationChanged();
+            // Do not raise PropertyChanged from this System.Timers background thread.
+            // The UI handler receives this event and updates the bound record on the
+            // DispatcherQueue, avoiding duplicate notifications and cross-thread churn.
             UsageRecordUpdated?.Invoke(this, _currentRecord);
 
             if (_currentRecord.Date < now.Date)
