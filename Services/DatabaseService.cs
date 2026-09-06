@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using Microsoft.Data.Sqlite;
 using ScreenTimeTracker.Models;
 using System;

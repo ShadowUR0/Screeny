@@ -1,0 +1,17 @@
+Screeny
+Copyright 2025 Arno Gevorkyan
+
+Original project: https://github.com/ArnoGevorkyan/Screeny
+
+This distribution is a modified fork maintained at:
+https://github.com/ShadowUR0/Screeny
+
+Modifications made in 2026 include a redesigned activity interface, performance and
+reliability work, improved icon resolution, SQLite persistence changes, single-instance
+behavior, upgradeable Windows installer support, and distribution/documentation changes.
+
+The original work and this modified distribution are provided under the Apache License,
+Version 2.0. See LICENSE.md for the full license text.
+
+Third-party software remains subject to its own license terms. See
+THIRD_PARTY_NOTICES.md and the licenses directory included with installer builds.

@@ -1,3 +1,4 @@
+# Modified in the ShadowUR0 Screeny fork in 2026.
 name: Windows build
 
 on:
@@ -35,6 +36,10 @@ jobs:
             Write-Error 'Vulnerable NuGet packages detected.'
             exit 1
           }
+
+      - name: Collect third-party license notices
+        shell: pwsh
+        run: ./tools/CollectThirdPartyNotices.ps1
 
       - name: Install Inno Setup
         shell: pwsh

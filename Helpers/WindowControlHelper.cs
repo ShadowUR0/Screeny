@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;

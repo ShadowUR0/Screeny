@@ -1,0 +1,201 @@
+/* Modified in the ShadowUR0 Screeny fork in 2026. */
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  background: #0c1215;
+  color: #f4f7f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(20, 203, 218, 0.14), transparent 30rem),
+    #0c1215;
+}
+
+.shell {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 72px 24px 36px;
+}
+
+.hero {
+  width: min(100%, 680px);
+  text-align: center;
+}
+
+.icon-wrap {
+  width: 116px;
+  height: 116px;
+  margin: 0 auto 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+}
+
+.icon-wrap img {
+  display: block;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #55dbe5;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(52px, 9vw, 84px);
+  font-weight: 650;
+  letter-spacing: -0.055em;
+}
+
+.lead {
+  max-width: 560px;
+  margin: 18px auto 34px;
+  color: #b9c2c6;
+  font-size: clamp(18px, 3vw, 22px);
+  line-height: 1.55;
+}
+
+.download {
+  width: min(100%, 360px);
+  min-height: 72px;
+  margin: 0 auto;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #071114;
+  text-decoration: none;
+  border-radius: 18px;
+  background: #2ed4df;
+  box-shadow: 0 18px 48px rgba(46, 212, 223, 0.18);
+  transition: transform 140ms ease, filter 140ms ease;
+}
+.download:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+}
+
+.download:focus-visible,
+.links a:focus-visible {
+  outline: 3px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 4px;
+}
+
+.download svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.download span {
+  display: grid;
+  text-align: left;
+}
+
+.download strong {
+  font-size: 17px;
+}
+
+.download small {
+  margin-top: 2px;
+  color: rgba(7, 17, 20, 0.68);
+  font-size: 12px;
+}
+.facts {
+  margin: 30px auto 0;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.facts span {
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #c9d2d5;
+  font-size: 12px;
+}
+
+.note {
+  max-width: 580px;
+  margin: 26px auto 0;
+  color: #8f9a9f;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.links {
+  margin-top: 26px;
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+}
+.links a {
+  color: #aab5b9;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.links a:hover {
+  color: #ffffff;
+}
+
+footer {
+  min-height: 56px;
+  padding: 0 20px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  color: #667277;
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .shell {
+    padding: 48px 18px 28px;
+  }
+
+  .icon-wrap {
+    width: 100px;
+    height: 100px;
+    border-radius: 26px;
+  }
+
+  .icon-wrap img {
+    width: 78px;
+    height: 78px;
+  }
+
+  .links {
+    gap: 16px;
+  }
+}

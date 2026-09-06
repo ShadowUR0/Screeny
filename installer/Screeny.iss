@@ -1,3 +1,4 @@
+; Modified in the ShadowUR0 Screeny fork in 2026.
 #define MyAppName "Screeny"
 #define MyAppVersion "1.8.2"
 #define MyAppExeName "Screeny.exe"
@@ -25,6 +26,10 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
 Source: "..\bin\x64\Release\net8.0-windows10.0.22621.0\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\artifacts\third-party\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\Screeny"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

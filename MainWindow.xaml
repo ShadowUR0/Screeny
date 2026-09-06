@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modified in the ShadowUR0 Screeny fork in 2026. -->
 <Window
     x:Class="ScreenTimeTracker.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -233,7 +234,7 @@
                             <!-- Visual parity with Digital Wellbeing's per-app timer affordance.
                                  It is intentionally non-interactive until app limits are implemented. -->
                             <TextBlock Grid.Column="3"
-                                       Text="⌛"
+                                       Text="âŒ›"
                                        FontFamily="Segoe UI Symbol"
                                        FontSize="16"
                                        Opacity="0.62"

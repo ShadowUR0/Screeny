@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 using System;
 using System.Collections.Concurrent;
 using System.IO;

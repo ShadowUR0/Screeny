@@ -1,3 +1,4 @@
+// Modified in the ShadowUR0 Screeny fork in 2026.
 namespace ScreenTimeTracker.Models
 {
     public sealed record UsageSlice(
