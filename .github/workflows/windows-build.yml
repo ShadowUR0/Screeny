@@ -36,11 +36,25 @@ jobs:
             exit 1
           }
 
-      - name: Upload Windows test build
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build upgradeable installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) {
+            throw "Inno Setup compiler not found at $iscc"
+          }
+          & $iscc 'installer\Screeny.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Screeny-windows-x64
-          path: bin/x64/Release/net8.0-windows10.0.22621.0/win-x64/
+          name: Screeny-setup-x64
+          path: artifacts/Screeny-Setup.exe
           if-no-files-found: error
           retention-days: 7
           compression-level: 9
