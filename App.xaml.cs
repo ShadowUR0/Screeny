@@ -24,6 +24,7 @@ public partial class App : Application
     private const uint MB_OK = 0x00000000;
 
     private readonly SingleInstanceService _singleInstanceService;
+    private DispatcherQueue? _dispatcherQueue;
     private Window? _window;
     private WindowTrackingService? _trackingService;
 
@@ -32,9 +33,27 @@ public partial class App : Application
 
     public App()
     {
-        // Acquire the process-wide guard before initializing SQLite or tracking. A second
-        // launch simply reveals the already-running Screeny window and then exits.
+        bool shutdownForUpdate = HasCommandLineSwitch("--shutdown-for-update");
+
+        // Acquire the process-wide guard before initializing SQLite or tracking.
         _singleInstanceService = new SingleInstanceService();
+
+        if (shutdownForUpdate)
+        {
+            // The installer starts Screeny with this switch before replacing files.
+            // If no instance is running there is nothing to stop. Otherwise signal the
+            // primary process and wait until its mutex is released.
+            if (_singleInstanceService.IsPrimaryInstance)
+            {
+                Environment.Exit(0);
+                return;
+            }
+
+            bool stopped = _singleInstanceService.RequestUpdateShutdownAndWaitForExit(TimeSpan.FromSeconds(8));
+            Environment.Exit(stopped ? 0 : 2);
+            return;
+        }
+
         if (!_singleInstanceService.IsPrimaryInstance)
         {
             _singleInstanceService.ActivateExistingInstance();
@@ -62,12 +81,46 @@ public partial class App : Application
 
             UnhandledException += App_UnhandledException;
             InitializeComponent();
-            DispatcherHelper.Initialize(DispatcherQueue.GetForCurrentThread());
+            _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+            DispatcherHelper.Initialize(_dispatcherQueue);
+            StartUpdateShutdownListener();
         }
         catch (Exception ex)
         {
             ShowErrorAndExit("The application failed to initialize properly.", ex);
         }
+    }
+
+    private static bool HasCommandLineSwitch(string value)
+    {
+        foreach (string arg in Environment.GetCommandLineArgs())
+        {
+            if (arg.Equals(value, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void StartUpdateShutdownListener()
+    {
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _singleInstanceService.WaitForUpdateShutdownRequest();
+                _dispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (MainWindowInstance is MainWindow mainWindow)
+                        mainWindow.ShutdownForUpdate();
+                    else
+                        Environment.Exit(0);
+                });
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
     }
 
     private static bool IsStartedFromWindowsStartup()
