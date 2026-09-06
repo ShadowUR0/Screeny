@@ -24,7 +24,14 @@ jobs:
         run: dotnet restore ScreenTimeTracker.sln
 
       - name: Build
-        run: dotnet build ScreenTimeTracker.sln -c Release --no-restore
+        run: dotnet build ScreenTimeTracker.sln -c Release --no-restore -p:AppxPackageSigningEnabled=false
 
       - name: Audit vulnerable packages
-        run: dotnet list ScreenTimeTracker.csproj package --vulnerable --include-transitive
+        shell: pwsh
+        run: |
+          $output = dotnet list ScreenTimeTracker.csproj package --vulnerable --include-transitive
+          $output
+          if ($output -match 'has the following vulnerable packages') {
+            Write-Error 'Vulnerable NuGet packages detected.'
+            exit 1
+          }
