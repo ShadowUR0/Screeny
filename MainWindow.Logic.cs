@@ -125,10 +125,11 @@ namespace ScreenTimeTracker
                 _isChartDirty = true;
                 UpdateSummaryTab(_usageRecords.ToList());
 
-                // Full integrity/maintenance work is intentionally infrequent. With a five-minute
-                // caller cadence, 72 cycles is roughly six hours instead of every hour.
+                // Perform the expensive integrity/ANALYZE maintenance at most about once per
+                // day while Screeny stays running. Five-minute refreshes are frequent enough
+                // for UI housekeeping, but full database checks do not belong on an hourly path.
                 _autoSaveCycleCount++;
-                if (_autoSaveCycleCount >= 72 && _databaseService != null)
+                if (_autoSaveCycleCount >= 288 && _databaseService != null)
                 {
                     _autoSaveCycleCount = 0;
                     _ = Task.Run(() =>
