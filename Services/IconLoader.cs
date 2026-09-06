@@ -21,8 +21,6 @@ namespace ScreenTimeTracker.Services
 
         public static IconLoader Instance { get; } = new IconLoader();
 
-        // A process name is already Screeny's stable icon identity. Keeping window handles
-        // in the cache caused it to grow forever as windows were opened and closed.
         private readonly ConcurrentDictionary<string, BitmapImage> _iconCache = new();
         private readonly ConcurrentDictionary<string, DateTime> _failedUntilUtc = new();
         private readonly ConcurrentDictionary<string, Task<BitmapImage?>> _inflightLoads = new();
@@ -67,7 +65,7 @@ namespace ScreenTimeTracker.Services
             var task = ResolveAndCacheAsync(cacheKey, record);
 
             _ = task.ContinueWith(
-                _ => _inflightLoads.TryRemove(cacheKey, out _),
+                completedTask => _inflightLoads.TryRemove(cacheKey, out _),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -88,8 +86,6 @@ namespace ScreenTimeTracker.Services
                     resolved = await TryLoadIconWithSHGetFileInfoAsync(exePath);
                 }
 
-                // Some packaged/sandboxed apps expose the best icon through their window.
-                // Keep this as a fallback rather than hitting every window with WM_GETICON.
                 if (resolved == null && record.WindowHandle != IntPtr.Zero)
                 {
                     resolved = await TryLoadIconFromWindowHandleAsync(record.WindowHandle);
@@ -102,8 +98,6 @@ namespace ScreenTimeTracker.Services
                 }
                 else
                 {
-                    // The UI already has a native placeholder. Do not repeatedly probe disk
-                    // and Win32 every 30 seconds for an icon that cannot be resolved.
                     _failedUntilUtc[cacheKey] = DateTime.UtcNow.Add(FailureCacheDuration);
                 }
 
