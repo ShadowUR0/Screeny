@@ -104,8 +104,6 @@ namespace ScreenTimeTracker
 
         private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
         {
-            // Screen-time tracking continues in WindowTrackingService, but the expensive
-            // chart/list refresh loop has no work to do while the window lives in the tray.
             _isWindowHidden = true;
             _updateTimer?.Stop();
             args.Cancel = true;
@@ -117,7 +115,19 @@ namespace ScreenTimeTracker
             if (args.WindowActivationState == WindowActivationState.Deactivated)
                 return;
 
+            bool wasHidden = _isWindowHidden;
             _isWindowHidden = false;
+
+            if (wasHidden)
+            {
+                // UI mutations are skipped while Screeny is in the tray. Rebuild exactly once
+                // from SQLite + the current live slice when the user actually asks to see it.
+                if (_viewModel.IsDateRangeSelected && _viewModel.SelectedEndDate.HasValue)
+                    LoadRecordsForDateRange(_viewModel.SelectedDate, _viewModel.SelectedEndDate.Value);
+                else
+                    LoadRecordsForDate(_viewModel.SelectedDate);
+            }
+
             if (_trackingService.IsTracking)
             {
                 _updateTimer.Start();
@@ -311,7 +321,12 @@ namespace ScreenTimeTracker
         {
             try
             {
-                if (_disposed || _isWindowHidden || _usageRecords == null || _isReloading) return;
+                if (_disposed || _usageRecords == null || _isReloading) return;
+                if (_isWindowHidden)
+                {
+                    _updateTimer.Stop();
+                    return;
+                }
 
                 _tickCount++;
                 if (_tickCount == int.MaxValue) _tickCount = 0;
@@ -370,10 +385,10 @@ namespace ScreenTimeTracker
 
                         DispatcherQueue?.TryEnqueue(() =>
                         {
+                            _isLiveTotalRefreshInFlight = false;
                             if (_disposed || _isWindowHidden) return;
                             _cachedTotalTime = totalTime;
                             _lastFullRefresh = DateTime.Now;
-                            _isLiveTotalRefreshInFlight = false;
                             if (ChartTimeValue != null)
                                 ChartTimeValue.Text = TimeUtil.FormatTimeSpan(totalTime);
                         });
@@ -428,11 +443,7 @@ namespace ScreenTimeTracker
 
         private void TrackingService_UsageRecordUpdated(object? sender, AppUsageRecord record)
         {
-            if (_disposed) return;
-
-            // Do not mutate the visible collection while hidden. Finalized slices continue to
-            // persist; the next visible refresh can rebuild the view from authoritative data.
-            if (_isWindowHidden) return;
+            if (_disposed || _isWindowHidden) return;
 
             DispatcherQueue?.TryEnqueue(() =>
             {
